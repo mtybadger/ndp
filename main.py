@@ -5,13 +5,13 @@ from PIL import Image
 import torch
 import torchvision
 from torch.utils.data import random_split, DataLoader, Dataset
-import pytorch_lightning as pl
-from pytorch_lightning import seed_everything
-from pytorch_lightning.trainer import Trainer
-from pytorch_lightning.callbacks import ModelCheckpoint, Callback, LearningRateMonitor
-from pytorch_lightning.utilities import rank_zero_only
+import lightning.pytorch as pl
+from lightning.pytorch import seed_everything
+from lightning.pytorch.trainer import Trainer
+from lightning.pytorch.callbacks import ModelCheckpoint, Callback, LearningRateMonitor
+from lightning.pytorch.utilities import rank_zero_only
 
-from taming.data.utils import custom_collate
+from data.utils import custom_collate
 
 
 def get_obj_from_str(string, reload=False):
@@ -220,34 +220,12 @@ class ImageLogger(Callback):
         super().__init__()
         self.batch_freq = batch_frequency
         self.max_images = max_images
-        self.logger_log_images = {
-            pl.loggers.WandbLogger: self._wandb,
-            pl.loggers.TestTubeLogger: self._testtube,
-        }
+        self.logger_log_images = {}
         self.log_steps = [2 ** n for n in range(int(np.log2(self.batch_freq)) + 1)]
         if not increase_log_steps:
             self.log_steps = [self.batch_freq]
         self.clamp = clamp
 
-    @rank_zero_only
-    def _wandb(self, pl_module, images, batch_idx, split):
-        raise ValueError("No way wandb")
-        grids = dict()
-        for k in images:
-            grid = torchvision.utils.make_grid(images[k])
-            grids[f"{split}/{k}"] = wandb.Image(grid)
-        pl_module.logger.experiment.log(grids)
-
-    @rank_zero_only
-    def _testtube(self, pl_module, images, batch_idx, split):
-        for k in images:
-            grid = torchvision.utils.make_grid(images[k])
-            grid = (grid+1.0)/2.0 # -1,1 -> 0,1; c,h,w
-
-            tag = f"{split}/{k}"
-            pl_module.logger.experiment.add_image(
-                tag, grid,
-                global_step=pl_module.global_step)
 
     @rank_zero_only
     def log_local(self, save_dir, split, images,
@@ -531,7 +509,7 @@ if __name__ == "__main__":
         data.setup()
 
         # configure learning rate
-        bs, base_lr = config.data.params.batch_size, config.model.base_learning_rate
+        bs, base_lr = config.data.params.batch_size, 4.5e-6
         if not cpu:
             ngpu = len(lightning_config.trainer.gpus.strip(",").split(','))
         else:

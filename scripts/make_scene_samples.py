@@ -8,16 +8,16 @@ from typing import Literal, List, Optional, Tuple
 import numpy as np
 import torch
 from omegaconf import OmegaConf
-from pytorch_lightning import seed_everything
+from lightning.pytorch import seed_everything
 from torch import Tensor
 from torchvision.utils import save_image
 from tqdm import tqdm
 
 from scripts.make_samples import get_parser, load_model_and_dset
-from taming.data.conditional_builder.objects_center_points import ObjectsCenterPointsConditionalBuilder
-from taming.data.helper_types import BoundingBox, Annotation
-from taming.data.annotated_objects_dataset import AnnotatedObjectsDataset
-from taming.models.cond_transformer import Net2NetTransformer
+from data.conditional_builder.objects_center_points import ObjectsCenterPointsConditionalBuilder
+from data.helper_types import BoundingBox, Annotation
+from data.annotated_objects_dataset import AnnotatedObjectsDataset
+from models.cond_transformer import Net2NetTransformer
 
 seed_everything(42424242)
 device: Literal['cuda', 'cpu'] = 'cuda'
