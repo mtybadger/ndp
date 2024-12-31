@@ -78,7 +78,7 @@ class ImageLogger(Callback):
                     if self.clamp:
                         images[k] = torch.clamp(images[k], -1., 1.)
 
-            self.log_local('/shared/imagenet/multi_logs/', split, images,
+            self.log_local('/shared/imagenet/multi_logs_4/', split, images,
                            pl_module.global_step, pl_module.current_epoch, batch_idx)
 
             logger_log_images = self.logger_log_images.get(logger, lambda *args, **kwargs: None)
@@ -130,8 +130,8 @@ class MyLightningCLI(LightningCLI):
         self.trainer.logger = WandbLogger(project="vqgan_multi_2")
         
         # configure learning rate
-        bs, base_lr = datamodule.batch_size, 2e-6
-        ngpu = trainer.num_devices
+        bs, base_lr = datamodule.batch_size, 1e-6
+        ngpu = trainer.num_devices * trainer.num_nodes
         accumulate_grad_batches = trainer.accumulate_grad_batches or 1
         print(f"accumulate_grad_batches = {accumulate_grad_batches}")
         trainer.accumulate_grad_batches = accumulate_grad_batches
@@ -215,7 +215,7 @@ def main():
         save_config_callback=None,              # turn off saving the config if you want
         trainer_defaults={
             "callbacks": [
-                ModelCheckpoint(save_top_k=-1, every_n_epochs=1, save_last=True, dirpath="/shared/imagenet/vqgan_logs"),
+                ModelCheckpoint(save_top_k=-1, every_n_epochs=1, save_last=True, dirpath="/shared/imagenet/vqgan_multi_9_logs"),
                 LearningRateMonitor(logging_interval="step"),
             ],
             "default_root_dir": os.getcwd(),
@@ -228,8 +228,8 @@ def main():
                         "static_graph": True,
                     }
                 },
-            "max_epochs": 50,
-            "default_root_dir": "/shared/imagenet/vqgan_multi_2_logs",
+            "max_epochs": 40,
+            "default_root_dir": "/shared/imagenet/vqgan_multi_8_logs",
             "precision": "bf16-mixed",
             "devices": 8,
             "num_nodes": 8,
