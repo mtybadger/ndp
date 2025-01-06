@@ -5,7 +5,7 @@ from PIL import Image
 import os
 
 # Define minimum dimensions required for cropping
-MIN_SIZE = 256
+MIN_SIZE = 32
 
 # Define the transforms using Albumentations
 transform = albumentations.Compose([
@@ -15,7 +15,7 @@ transform = albumentations.Compose([
 ])
 
 # Create output directory if it doesn't exist
-os.makedirs("/Users/sprucecampbell/Documents/ai/ndp/cifar10/test", exist_ok=True)
+os.makedirs("/home/ubuntu/cifar-testing/ndp/cifar10/train", exist_ok=True)
 
 def process_image(example, idx):
     # Convert PIL Image to numpy array for Albumentations
@@ -29,7 +29,7 @@ def process_image(example, idx):
     transformed_image = Image.fromarray(transformed_image)
     
     # Save the transformed image
-    save_path = os.path.join("/Users/sprucecampbell/Documents/ai/ndp/cifar10/test", f"image_{idx}.jpg")
+    save_path = os.path.join("/home/ubuntu/cifar-testing/ndp/cifar10/train", f"image_{idx}.jpg")
     transformed_image.save(save_path, quality=95)
     
     return example
@@ -38,7 +38,7 @@ def process_image(example, idx):
 imagenet = datasets.load_dataset("uoft-cs/cifar10", trust_remote_code=True)
 
 # Process images in parallel using datasets.map
-imagenet['test'] = imagenet['test'].map(
+imagenet['train'] = imagenet['train'].map(
     process_image,
     with_indices=True,
 )
