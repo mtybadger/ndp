@@ -75,26 +75,26 @@ class VQLPIPSWithDiscriminator(nn.Module):
 
     def forward(self, codebook_loss, inputs, reconstructions, optimizer_idx,
                 global_step, last_layer=None, cond=None, split="train"):
-        rec_loss = sum(torch.abs(inputs.contiguous() - rec.contiguous()) for rec in reconstructions)
+        rec_loss = sum(torch.abs(inputs.contiguous() - rec.contiguous()) * (1/2**i) for i, rec in enumerate(reconstructions))
         if self.perceptual_weight > 0:
-            p_loss = self.perceptual_loss(inputs.contiguous(), reconstructions[0].contiguous()) + self.perceptual_loss(inputs.contiguous(), reconstructions[1].contiguous())
+            p_loss = self.perceptual_loss(inputs.contiguous(), reconstructions[0].contiguous()) + self.perceptual_loss(inputs.contiguous(), reconstructions[1].contiguous()) * 0.5
             rec_loss = rec_loss + self.perceptual_weight * p_loss
         else:
             p_loss = torch.tensor([0.0])
 
         nll_loss = rec_loss
-        #nll_loss = torch.sum(nll_loss) / nll_loss.shape[0]
-        nll_loss = torch.mean(nll_loss)
+        nll_loss = torch.sum(nll_loss) / nll_loss.shape[0]
+        # nll_loss = torch.mean(nll_loss)
 
         # now the GAN part
         if optimizer_idx == 0:
             # generator update
             if cond is None:
                 assert not self.disc_conditional
-                logits_fake = self.discriminator(reconstructions[0].contiguous()) + self.discriminator(reconstructions[1].contiguous())
+                logits_fake = self.discriminator(reconstructions[0].contiguous()) + self.discriminator(reconstructions[1].contiguous()) * 0.5
             else:
                 assert self.disc_conditional
-                logits_fake = self.discriminator(torch.cat((reconstructions[0].contiguous(), cond), dim=1)) + self.discriminator(torch.cat((reconstructions[1].contiguous(), cond), dim=1))
+                logits_fake = self.discriminator(torch.cat((reconstructions[0].contiguous(), cond), dim=1)) + self.discriminator(torch.cat((reconstructions[1].contiguous(), cond), dim=1)) * 0.5
             g_loss = -torch.mean(logits_fake)
 
             try:

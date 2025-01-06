@@ -55,3 +55,9 @@ Thumbs.db
 
 *.err
 *.log
+
+*.jpg
+*.png
+
+lightning_logs/
+*.txt

@@ -225,17 +225,11 @@ class VQMultiModel(pl.LightningModule):
         
         z_channels = 256
         
-        self.encoder_1 = Encoder(**ddconfig, ch_mult=[1,1,2,4], in_channels=3, out_ch=3, z_channels=z_channels, resolution=256, attn_resolutions=[32])
-        self.encoder_2 = Encoder(**ddconfig, ch_mult=[1,2], in_channels=256, out_ch=256, z_channels=z_channels, resolution=32, attn_resolutions=[16])
-        self.encoder_3 = Encoder(**ddconfig, ch_mult=[1,2], in_channels=256, out_ch=256, z_channels=z_channels, resolution=16, attn_resolutions=[8])
-        self.encoder_4 = Encoder(**ddconfig, ch_mult=[1,2], in_channels=256, out_ch=256, z_channels=z_channels, resolution=8, attn_resolutions=[4])
-        self.encoder_5 = Encoder(**ddconfig, ch_mult=[1,2], in_channels=256, out_ch=256, z_channels=z_channels, resolution=4, attn_resolutions=[2])
+        self.encoder_1 = Encoder(**ddconfig, ch_mult=[1,2,2], in_channels=3, out_ch=3, z_channels=z_channels, resolution=32, attn_resolutions=[16])
+        self.encoder_2 = Encoder(**ddconfig, ch_mult=[1,2], in_channels=256, out_ch=256, z_channels=z_channels, resolution=8, attn_resolutions=[4])
+        self.encoder_3 = Encoder(**ddconfig, ch_mult=[1,2], in_channels=256, out_ch=256, z_channels=z_channels, resolution=4, attn_resolutions=[2])
         
-        self.decoder_1 = Decoder(**ddconfig, ch_mult=[1,1,2,4], in_channels=z_channels * 5, out_ch=3, z_channels=z_channels * 5, resolution=256, attn_resolutions=[32])
-        self.decoder_2 = Decoder(**ddconfig, ch_mult=[1,2], in_channels=z_channels * 4, out_ch=256, z_channels=z_channels * 4, resolution=32, attn_resolutions=[16])
-        self.decoder_3 = Decoder(**ddconfig, ch_mult=[1,2], in_channels=z_channels * 3, out_ch=256, z_channels=z_channels * 3, resolution=16, attn_resolutions=[8])
-        self.decoder_4 = Decoder(**ddconfig, ch_mult=[1,2], in_channels=z_channels * 2, out_ch=256, z_channels=z_channels * 2, resolution=8, attn_resolutions=[4])
-        self.decoder_5 = Decoder(**ddconfig, ch_mult=[1,2], in_channels=z_channels, out_ch=256, z_channels=z_channels, resolution=4, attn_resolutions=[2])
+        self.decoder = Decoder(**ddconfig, ch_mult=[1,2,2], in_channels=z_channels * 3, out_ch=3, z_channels=z_channels * 3, resolution=32, attn_resolutions=[16])
         
         self.quantize_1 = VectorQuantizer(n_embed, embed_dim, beta=0.25,
                                         remap=remap, sane_index_shape=sane_index_shape)
@@ -243,22 +237,14 @@ class VQMultiModel(pl.LightningModule):
                                         remap=remap, sane_index_shape=sane_index_shape)
         self.quantize_3 = VectorQuantizer(n_embed, embed_dim, beta=0.25,
                                         remap=remap, sane_index_shape=sane_index_shape)
-        self.quantize_4 = VectorQuantizer(n_embed, embed_dim, beta=0.25,
-                                        remap=remap, sane_index_shape=sane_index_shape)
-        self.quantize_5 = VectorQuantizer(n_embed, embed_dim, beta=0.25,
-                                        remap=remap, sane_index_shape=sane_index_shape)
         
-        self.quant_conv_1 = torch.nn.Conv2d(z_channels * 5, embed_dim, 1)
-        self.quant_conv_2 = torch.nn.Conv2d(z_channels * 4, embed_dim, 1)
-        self.quant_conv_3 = torch.nn.Conv2d(z_channels * 3, embed_dim, 1)
-        self.quant_conv_4 = torch.nn.Conv2d(z_channels * 2, embed_dim, 1)
-        self.quant_conv_5 = torch.nn.Conv2d(z_channels, embed_dim, 1)
+        self.quant_conv_1 = torch.nn.Conv2d(z_channels, embed_dim, 1)
+        self.quant_conv_2 = torch.nn.Conv2d(z_channels, embed_dim, 1)
+        self.quant_conv_3 = torch.nn.Conv2d(z_channels, embed_dim, 1)
         
         self.post_quant_conv_1 = torch.nn.Conv2d(embed_dim, z_channels, 1)
         self.post_quant_conv_2 = torch.nn.Conv2d(embed_dim, z_channels, 1)
         self.post_quant_conv_3 = torch.nn.Conv2d(embed_dim, z_channels, 1)
-        self.post_quant_conv_4 = torch.nn.Conv2d(embed_dim, z_channels, 1)
-        self.post_quant_conv_5 = torch.nn.Conv2d(embed_dim, z_channels, 1)
         
         self.dropout_step = dropout_step
         
@@ -287,82 +273,48 @@ class VQMultiModel(pl.LightningModule):
         enc_1 = self.encoder_1(x)
         enc_2 = self.encoder_2(enc_1)
         enc_3 = self.encoder_3(enc_2)
-        enc_4 = self.encoder_4(enc_3)
-        enc_5 = self.encoder_5(enc_4)
-        
-        conv_5 = self.quant_conv_5(enc_5)
-        quant_5, emb_loss_5, info_5 = self.quantize_5(conv_5)
-        post_quant_5 = self.post_quant_conv_5(quant_5)
-        
-        dec_5 = self.decoder_5(post_quant_5)
-        enc_4 = torch.cat([dec_5, enc_4], dim=1)
-        
-        conv_4 = self.quant_conv_4(enc_4)
-        quant_4, emb_loss_4, info_4 = self.quantize_4(conv_4)
-        post_quant_4 = self.post_quant_conv_4(quant_4)
-        post_quant_4 = torch.cat([dec_5, post_quant_4], dim=1)
-        
-        dec_4 = self.decoder_4(post_quant_4)
-        enc_3 = torch.cat([dec_5.repeat(1, 1, 2, 2), dec_4, enc_3], dim=1)
         
         conv_3 = self.quant_conv_3(enc_3)
         quant_3, emb_loss_3, info_3 = self.quantize_3(conv_3)
-        post_quant_3 = self.post_quant_conv_3(quant_3)
-        post_quant_3 = torch.cat([dec_5.repeat(1, 1, 2, 2), dec_4, post_quant_3], dim=1)
-        
-        dec_3 = self.decoder_3(post_quant_3)
-        enc_2 = torch.cat([dec_5.repeat(1, 1, 4, 4), dec_4.repeat(1, 1, 2, 2), dec_3, enc_2], dim=1)
         
         conv_2 = self.quant_conv_2(enc_2)
         quant_2, emb_loss_2, info_2 = self.quantize_2(conv_2)
-        post_quant_2 = self.post_quant_conv_2(quant_2)
-        post_quant_2 = torch.cat([dec_5.repeat(1,1,4,4), dec_4.repeat(1,1,2,2), dec_3, post_quant_2], dim=1)
-        
-        dec_2 = self.decoder_2(post_quant_2)
-        enc_1 = torch.cat([dec_5.repeat(1,1,8,8), dec_4.repeat(1,1,4,4), dec_3.repeat(1,1,2,2), dec_2, enc_1], dim=1)
         
         conv_1 = self.quant_conv_1(enc_1)
         quant_1, emb_loss_1, info_1 = self.quantize_1(conv_1)
         
-        return quant_1, quant_2, quant_3, quant_4, quant_5, emb_loss_1 + emb_loss_2 + emb_loss_3 + emb_loss_4 + emb_loss_5, (info_1, info_2, info_3, info_4, info_5)
+        return quant_1, quant_2, quant_3, emb_loss_1 + emb_loss_2 + emb_loss_3, (info_1, info_2, info_3)
 
-    def decode(self, quant1, quant2, quant3, quant4, quant5):
+    def decode(self, quant1, quant2, quant3):
         
         quant2 = quant2.repeat(1, 1, 2, 2)
         quant3 = quant3.repeat(1, 1, 4, 4)
-        quant4 = quant4.repeat(1, 1, 8, 8)
-        quant5 = quant5.repeat(1, 1, 16, 16)
         
         quant1 = self.post_quant_conv_1(quant1)
         quant2 = self.post_quant_conv_2(quant2)
         quant3 = self.post_quant_conv_3(quant3)
-        quant4 = self.post_quant_conv_4(quant4)
-        quant5 = self.post_quant_conv_5(quant5)
         
-        out = torch.cat([quant1, quant2, quant3, quant4, quant5], dim=1)
-        out = self.decoder_1(out)
+        out = torch.cat([quant1, quant2, quant3], dim=1)
+        out = self.decoder(out)
         return out
     
     def forward(self, input):
-        quant1, quant2, quant3, quant4, quant5, diff, _ = self.encode(input)
+        quant1, quant2, quant3, diff, _ = self.encode(input)
         
-        token_drop = [2, 8, 64, 256]
-        if self.global_step > self.dropout_step:
-            token_drop = [2, 16, 128, 512]
-        elif self.global_step > self.dropout_step * 2:
-            token_drop = [2, 16, 128, 768]
+        token_drop = [4, 1, 0]
+        # if self.global_step > self.dropout_step:
+        #     token_drop = [2, 16, 128, 512]
+        # elif self.global_step > self.dropout_step * 2:
+        #     token_drop = [2, 16, 128, 768]
 
-        (quant1, quant2, quant3, quant4), (zero_1, zero_2, zero_3, zero_4) = self.cascade_drop(quant4, quant3, quant2, quant1, input.device, token_drop[0], token_drop[1], token_drop[2], token_drop[3])
+        (quant1, quant2, quant3), (zero_1, zero_2, zero_3) = self.cascade_drop(quant3, quant2, quant1, input.device, token_drop)
                     
-        
-        y1 = self.decode(quant1, quant2, quant3, quant4, quant5)
-        y2 = self.decode(zero_1, quant2, quant3, quant4, quant5)
-        y3 = self.decode(zero_1, zero_2, quant3, quant4, quant5)
-        y4 = self.decode(zero_1, zero_2, zero_3, quant4, quant5)
-        y5 = self.decode(zero_1, zero_2, zero_3, zero_4, quant5)
-        return (y1, y2, y3, y4, y5), diff
+        y1 = self.decode(quant1, quant2, quant3)
+        y2 = self.decode(zero_1, quant2, quant3)
+        y3 = self.decode(zero_1, zero_2, quant3)
+        return (y1, y2, y3), diff
     
-    def cascade_drop(self, quant4, quant3, quant2, quant1, device, max_drop_4, max_drop_3, max_drop_2, max_drop_1):
+    def cascade_drop(self, quant3, quant2, quant1, device, token_drop):
         """
         Example function to show how to do the cascading dropout:
         - max_drop_4: maximum number of tokens to drop in 4x4
@@ -371,78 +323,20 @@ class VQMultiModel(pl.LightningModule):
         - max_drop_1: maximum number in 32x32
         """
         
-        B, C, H4, W4 = quant4.shape  # 4x4
-        _, _, H3, W3 = quant3.shape  # 8x8
-        _, _, H2, W2 = quant2.shape  # 16x16
-        _, _, H1, W1 = quant1.shape  # 32x32
+        B, C, H3, W3 = quant1.shape  # 8x8
+        _, _, H2, W2 = quant2.shape  # 4x4
+        _, _, H1, W1 = quant3.shape  # 2x2
         
         zero_tokens = [
             self.quantize_1.get_codebook_entry(torch.zeros(B, dtype=torch.long, device=device), shape=(B, 1, 1, C)),
             self.quantize_2.get_codebook_entry(torch.zeros(B, dtype=torch.long, device=device), shape=(B, 1, 1, C)),
             self.quantize_3.get_codebook_entry(torch.zeros(B, dtype=torch.long, device=device), shape=(B, 1, 1, C)),
-            self.quantize_4.get_codebook_entry(torch.zeros(B, dtype=torch.long, device=device), shape=(B, 1, 1, C))
         ]
         
         # --------------------------
-        # 1) Dropout in quant4 (4x4)
+        # 3) Dropout in quant2 (4x4)
         # --------------------------
-        num_drop_4 = torch.randint(0, max_drop_4+1, (1,)).item()  # 0 to max_drop_4
-        if num_drop_4 > 0:
-            indices_4 = torch.randperm(H4*W4)[:num_drop_4].to(device)
-            for idx in indices_4:
-                c_h = idx // W4
-                c_w = idx % W4
-                # zero out the 4x4 token
-                quant4[:, :, c_h, c_w] = zero_tokens[3][:, :, 0, 0]
-                
-                # zero out the corresponding 2D region in quant3, quant2, quant1
-                # For example, scale from 4x4 -> 8x8
-                # region in 8x8 is 2x2
-                block_size_3 = 2
-                r_start_3 = block_size_3 * c_h
-                c_start_3 = block_size_3 * c_w
-                quant3[:, :, r_start_3:r_start_3+block_size_3, c_start_3:c_start_3+block_size_3] = zero_tokens[2]
-                
-                # region in 16x16 is 4x4
-                block_size_2 = 4
-                r_start_2 = block_size_2 * c_h
-                c_start_2 = block_size_2 * c_w
-                quant2[:, :, r_start_2:r_start_2+block_size_2, c_start_2:c_start_2+block_size_2] = zero_tokens[1]
-                
-                # region in 32x32 is 8x8
-                block_size_1 = 8
-                r_start_1 = block_size_1 * c_h
-                c_start_1 = block_size_1 * c_w
-                quant1[:, :, r_start_1:r_start_1+block_size_1, c_start_1:c_start_1+block_size_1] = zero_tokens[0]
-        
-        # --------------------------
-        # 2) Dropout in quant3 (8x8)
-        # --------------------------
-        num_drop_3 = torch.randint(0, max_drop_3+1, (1,)).item()  # 0 to max_drop_3
-        if num_drop_3 > 0:
-            indices_3 = torch.randperm(H3*W3)[:num_drop_3].to(device)
-            for idx in indices_3:
-                c_h = idx // W3
-                c_w = idx % W3
-                # zero out the 8x8 token
-                quant3[:, :, c_h, c_w] = zero_tokens[2][:, :, 0, 0]
-                
-                # zero out region in quant2 (16x16) -> scale factor is 2
-                block_size_2 = 2
-                r_start_2 = block_size_2 * c_h
-                c_start_2 = block_size_2 * c_w
-                quant2[:, :, r_start_2:r_start_2+block_size_2, c_start_2:c_start_2+block_size_2] = zero_tokens[1]
-                
-                # zero out region in quant1 (32x32) -> scale factor is 4
-                block_size_1 = 4
-                r_start_1 = block_size_1 * c_h
-                c_start_1 = block_size_1 * c_w
-                quant1[:, :, r_start_1:r_start_1+block_size_1, c_start_1:c_start_1+block_size_1] = zero_tokens[0]
-
-        # --------------------------
-        # 3) Dropout in quant2 (16x16)
-        # --------------------------
-        num_drop_2 = torch.randint(0, max_drop_2+1, (1,)).item()
+        num_drop_2 = torch.randint(0, token_drop[1]+1, (1,)).item()
         if num_drop_2 > 0:
             indices_2 = torch.randperm(H2*W2)[:num_drop_2].to(device)
             for idx in indices_2:
@@ -459,7 +353,7 @@ class VQMultiModel(pl.LightningModule):
         # --------------------------
         # 4) Dropout in quant1 (32x32)
         # --------------------------
-        num_drop_1 = torch.randint(0, max_drop_1+1, (1,)).item()
+        num_drop_1 = torch.randint(0, token_drop[0]+1, (1,)).item()
         if num_drop_1 > 0:
             indices_1 = torch.randperm(H1*W1)[:num_drop_1].to(device)
             for idx in indices_1:
@@ -467,12 +361,11 @@ class VQMultiModel(pl.LightningModule):
                 c_w = idx % W1
                 quant1[:, :, c_h, c_w] = zero_tokens[0][:, :, 0, 0]
                 
-        zero_1 = zero_tokens[0].repeat(1, 1, 32, 32)
-        zero_2 = zero_tokens[1].repeat(1, 1, 16, 16)
-        zero_3 = zero_tokens[2].repeat(1, 1, 8, 8)
-        zero_4 = zero_tokens[3].repeat(1, 1, 4, 4)
+        zero_1 = zero_tokens[0].repeat(1, 1, 8, 8)
+        zero_2 = zero_tokens[1].repeat(1, 1, 4, 4)
+        zero_3 = zero_tokens[2].repeat(1, 1, 2, 2)
         
-        return (quant1, quant2, quant3, quant4), (zero_1, zero_2, zero_3, zero_4)
+        return (quant1, quant2, quant3), (zero_1, zero_2, zero_3)
 
 
     def get_input(self, batch, k):
@@ -536,7 +429,7 @@ class VQMultiModel(pl.LightningModule):
         lr = self.learning_rate
         # List all parameters for the autoencoder optimizer:
         # 1. Encoder/decoder networks
-        encoder_decoder_params = list(self.encoder_1.parameters()) + list(self.decoder_1.parameters()) + list(self.encoder_2.parameters()) + list(self.decoder_2.parameters()) + list(self.encoder_3.parameters()) + list(self.decoder_3.parameters())
+        encoder_decoder_params = list(self.encoder_1.parameters()) + list(self.encoder_2.parameters()) + list(self.encoder_3.parameters()) + list(self.decoder.parameters())
         
         # 2. Quantization components
         quant_params = list(self.quantize_1.parameters()) + list(self.quantize_2.parameters()) + list(self.quantize_3.parameters())
@@ -558,7 +451,7 @@ class VQMultiModel(pl.LightningModule):
         return [opt_ae, opt_disc], [sched_ae, sched_disc]
 
     def get_last_layer(self):
-        return self.decoder_1.conv_out.weight
+        return self.decoder.conv_out.weight
 
     def log_images(self, batch, **kwargs):
         log = dict()
