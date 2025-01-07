@@ -134,3 +134,22 @@ class VQLPIPSWithDiscriminator(nn.Module):
                    "{}/logits_fake".format(split): logits_fake.detach().mean()
                    }
             return d_loss, log
+
+class VQLPIPSWithDiscriminatorInference(nn.Module):
+    def __init__(self, perceptual_weight=1.0):
+        super().__init__()
+        self.perceptual_loss = LPIPS().eval()
+        self.perceptual_weight = perceptual_weight
+
+
+    def forward(self, input, reconstruction):
+        rec_loss = torch.abs(input.contiguous() - reconstruction.contiguous())
+        if self.perceptual_weight > 0:
+            p_loss = self.perceptual_loss(input.contiguous(), reconstruction.contiguous())
+            rec_loss = rec_loss + self.perceptual_weight * p_loss
+        else:
+            p_loss = torch.tensor([0.0])
+
+        nll_loss = rec_loss.mean(dim=tuple(range(1, rec_loss.dim())))
+
+        return nll_loss

@@ -15,7 +15,7 @@ transform = albumentations.Compose([
 ])
 
 # Create output directory if it doesn't exist
-os.makedirs("/home/ubuntu/cifar-testing/ndp/tinyimagenet/test", exist_ok=True)
+os.makedirs("./tinyimagenet/test", exist_ok=True)
 
 def process_image(example, idx):
     # Convert PIL Image to numpy array for Albumentations
@@ -29,7 +29,7 @@ def process_image(example, idx):
     transformed_image = Image.fromarray(transformed_image)
     
     # Save the transformed image
-    save_path = os.path.join("/home/ubuntu/cifar-testing/ndp/tinyimagenet/test", f"image_{idx}.jpg")
+    save_path = os.path.join("./tinyimagenet/test", f"image_{idx}.jpg")
     transformed_image.save(save_path, quality=95)
     
     return example
