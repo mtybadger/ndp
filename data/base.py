@@ -68,3 +68,4 @@ class NumpyPaths(ImagePaths):
         image = self.preprocessor(image=image)["image"]
         image = (image/127.5 - 1.0).astype(np.float32)
         return image
+
