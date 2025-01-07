@@ -21,6 +21,7 @@ from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.utilities.rank_zero import rank_zero_only
 import torchvision
 
+# torch.set_float32_matmul_precision('medium')
 
 class ImageLogger(Callback):
     def __init__(self, batch_frequency, max_images, clamp=True, increase_log_steps=True):
@@ -70,7 +71,7 @@ class ImageLogger(Callback):
 
             for k in images:
                 if isinstance(images[k], (list, tuple)):
-                    # Concatenate all images in the tuple horizontally
+                    # Concatenate all images in the tuple vertically
                     N = min(images[k][0].shape[0], self.max_images)
                     processed_images = []
                     for img in images[k]:
@@ -80,7 +81,7 @@ class ImageLogger(Callback):
                             if self.clamp:
                                 img = torch.clamp(img, -1., 1.)
                         processed_images.append(img)
-                    images[k] = torch.cat(processed_images, dim=3)  # Concatenate along width dimension
+                    images[k] = torch.cat(processed_images, dim=2)  # Concatenate along height dimension
                 else:
                     N = min(images[k].shape[0], self.max_images)
                     images[k] = images[k][:N]
@@ -89,7 +90,7 @@ class ImageLogger(Callback):
                         if self.clamp:
                             images[k] = torch.clamp(images[k], -1., 1.)
 
-            self.log_local('/Users/sprucecampbell/Documents/ai/ndp/cifar10/single_logs/', split, images,
+            self.log_local('/home/ubuntu/cifar-testing/ndp/tinyimagenet/single_logs/', split, images,
                            pl_module.global_step, pl_module.current_epoch, batch_idx)
 
             logger_log_images = self.logger_log_images.get(logger, lambda *args, **kwargs: None)
@@ -138,7 +139,7 @@ class MyLightningCLI(LightningCLI):
         model = self.model
         datamodule = self.datamodule
         
-        # self.trainer.logger = WandbLogger(project="vqgan_single")
+        self.trainer.logger = WandbLogger(project="vqgan_single")
         
         # configure learning rate
         bs, base_lr = datamodule.batch_size, 2e-6
@@ -162,8 +163,8 @@ class MyLightningCLI(LightningCLI):
     from torch.utils.data import DataLoader
 
 class CIFAR10DataModule(pl.LightningDataModule):
-    def __init__(self, batch_size=8,
-                 wrap=False, num_workers=4):
+    def __init__(self, batch_size=128,
+                 wrap=False, num_workers=8):
         super().__init__()
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -171,12 +172,12 @@ class CIFAR10DataModule(pl.LightningDataModule):
 
         # Directly instantiate the datasets
         self.train_dataset = CustomTrain(
-            training_images_list_file="/Users/sprucecampbell/Documents/ai/ndp/cifar10/train.txt",
+            training_images_list_file="/home/ubuntu/cifar-testing/ndp/cifar10/train.txt",
             size=32
         )
         
         self.val_dataset = CustomTest(
-            test_images_list_file="/Users/sprucecampbell/Documents/ai/ndp/cifar10/test.txt", 
+            test_images_list_file="/home/ubuntu/cifar-testing/ndp/cifar10/test.txt", 
             size=32
         )
 
@@ -213,6 +214,57 @@ class CIFAR10DataModule(pl.LightningDataModule):
         return self.val_dataloader()
 
 
+class TinyImageNetDataModule(pl.LightningDataModule):
+    def __init__(self, batch_size=128,
+                 wrap=False, num_workers=8):
+        super().__init__()
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.wrap = wrap
+
+        # Directly instantiate the datasets
+        self.train_dataset = CustomTrain(
+            training_images_list_file="/home/ubuntu/cifar-testing/ndp/tinyimagenet/train.txt",
+            size=64
+        )
+        
+        self.val_dataset = CustomTest(
+            test_images_list_file="/home/ubuntu/cifar-testing/ndp/tinyimagenet/test.txt", 
+            size=64
+        )
+
+        if self.wrap:
+            self.train_dataset = WrappedDataset(self.train_dataset)
+            self.val_dataset = WrappedDataset(self.val_dataset)
+
+    def prepare_data(self):
+        # Nothing to prepare since datasets are instantiated in __init__
+        pass
+
+    def setup(self, stage=None):
+        # Nothing to setup since datasets are instantiated in __init__
+        pass
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=True,
+            collate_fn=custom_collate
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            collate_fn=custom_collate
+        )
+
+    def test_dataloader(self):
+        return self.val_dataloader()
+
 
 
 def main():
@@ -220,23 +272,8 @@ def main():
     # If you call `MyLightningCLI(..., run=True)`, it will automatically parse
     # and then run the subcommand. For example, `python cli_main.py fit --model.x=123`.
     MyLightningCLI(
-        model_class=VQMultiModel,        # or a wrapper that calls instantiate_from_config
-        datamodule_class=CIFAR10DataModule,  # your custom DM
-        seed_everything_default=23,             # default seed
-        save_config_callback=None,              # turn off saving the config if you want
-        trainer_defaults={
-            "callbacks": [
-                ModelCheckpoint(save_top_k=-1, every_n_epochs=1, save_last=True, dirpath="/Users/sprucecampbell/Documents/ai/ndp/cifar10/model"),
-                LearningRateMonitor(logging_interval="step"),
-            ],
-            "default_root_dir": os.getcwd(),
-            "max_epochs": 50,
-            "precision": "16-mixed",
-            "devices": 1,
-            "log_every_n_steps": 10,
-            "accelerator": "mps",
-        },
         run=True,  # parse args + run subcommand (fit, test, etc.)
+        save_config_kwargs={"overwrite": True}
     )
 
 
