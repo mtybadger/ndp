@@ -127,16 +127,36 @@ class DifficultyViT(pl.LightningModule):
         x = torch.cat(pos_encoded_chunks, dim=1)  # (b, sum_of_all_r^2, dim)
 
         x = self.transformer(x)
-        print(x.shape)
+        
+        output = self.linear_head(x).squeeze(dim=-1)
+        print("Linear head output shape: ", output.shape)
 
-        return self.linear_head(x)
+        return output
     
     
     def training_step(self, batch, batch_idx):
+        tokens = batch["tokens"]
+        difficulties = batch["difficulties"]
+        print("Training step input shape: ", tokens.shape)
         # training_step defines the train loop.
-        x, _ = batch
-        x = self.forward(x)
-        return x
+        x = self.forward(tokens)
+        
+        # Create a mask for non-zero difficulties and tokens
+        mask = (difficulties != 0) & (tokens != 0)
+        
+        # Compute the MSE loss only for the masked elements
+        loss = F.mse_loss(x[mask], difficulties[mask])
+        self.log("train_loss", loss)
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        tokens = batch["tokens"]
+        difficulties = batch["difficulties"]
+        x = self.forward(tokens)
+        mask = (difficulties != 0) & (tokens != 0)
+        loss = F.mse_loss(x[mask], difficulties[mask])
+        self.log("val_loss", loss)
+        return loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)

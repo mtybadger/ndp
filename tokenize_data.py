@@ -6,40 +6,49 @@ from torch.utils.data import DataLoader
 import numpy as np
 from modules.losses.vqperceptual import VQLPIPSWithDiscriminatorInference
 from tqdm import tqdm
-def tokenize_data():
-    # Load previously saved difficulties if they exist and get number of processed samples
+import json
+
+def process_dataset(dataset, batch_size, max_samples, prefix):
+    # Load previously saved data if it exists and get number of processed samples
     try:
-        existing_difficulties = np.loadtxt('./tinyimagenet/difficulties.txt')
-        samples_processed = len(existing_difficulties)
-        print(f"Found {samples_processed} existing samples")
-    except:
-        existing_difficulties = None
         samples_processed = 0
-        print("No saved difficulties found, calculating from start...")
+        with open(f'./tinyimagenet/{prefix}.jsonl', 'r') as f:
+            for line in f:
+                samples_processed += 1
+        print(f"Found {samples_processed} existing samples for {prefix}")
+        
+        # Load existing data
+        existing_data = []
+        with open(f'./tinyimagenet/{prefix}.jsonl', 'r') as f:
+            for line in f:
+                existing_data.append(json.loads(line))
+                
+    except:
+        existing_data = []
+        samples_processed = 0
+        print(f"No saved data found for {prefix}, calculating from start...")
     
     model = VQMultiModel.load_from_checkpoint("./tinyimagenet/last-v3.ckpt")
     model.to("mps")
     model.eval()
 
-    dataset = CustomTrain(
-                training_images_list_file="./tinyimagenet/train.txt",
-                size=64
-            )
-
-    batch_size = 100
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=1, collate_fn=custom_collate)
     loss = VQLPIPSWithDiscriminatorInference().to("mps")
 
-    all_batch_difficulties = []
-    if existing_difficulties is not None:
-        all_batch_difficulties.append(existing_difficulties)
-    
     # Skip already processed batches
     batches_to_skip = samples_processed // batch_size
     
-    for batch_idx, batch in enumerate(tqdm(dataloader)):
+    # Load labels
+    with open('./tinyimagenet/labels.txt', 'r') as f:
+        labels = [int(line.strip()) for line in f if line.strip()]
+    
+    total_samples = 0
+    for batch_idx, batch in enumerate(tqdm(dataloader, total=max_samples // batch_size)):
         if batch_idx < batches_to_skip:
             continue
+            
+        if total_samples >= max_samples:
+            break
             
         x = model.get_input(batch,model.image_key)
 
@@ -63,6 +72,12 @@ def tokenize_data():
             y4 = model.decode(quant1, quant2, quant3, quant4)
 
         images = torch.cat([y1.unsqueeze(0), y2.unsqueeze(0), y3.unsqueeze(0), y4.unsqueeze(0)], dim=0)
+        tokens = torch.cat([
+            (info4.reshape(batch_size, -1) + 202),
+            (info3.reshape(batch_size, -1) + 202 + 8192),
+            (info2.reshape(batch_size, -1) + 202 + 8192 + 4096),
+            (info1.reshape(batch_size, -1) + 202 + 8192 + 4096 + 4096)
+        ], dim=1)
 
         patch_difficulties = [torch.zeros(batch_size,2,2), torch.zeros(batch_size,4,4), torch.zeros(batch_size,8,8)]
 
@@ -108,20 +123,49 @@ def tokenize_data():
                 patches += 1
         
         batch_difficulties = torch.cat([
+            torch.zeros(batch_size, 1),
             patch_difficulties[0].reshape(-1, 4), # Level 1: 2x2
             patch_difficulties[1].reshape(-1, 16), # Level 2: 4x4 
-            patch_difficulties[2].reshape(-1, 64)  # Level 3: 8x8
+            patch_difficulties[2].reshape(-1, 64),  # Level 3: 8x8
+            torch.zeros(batch_size, 256)
         ], dim=1)
-
-        all_batch_difficulties.append(batch_difficulties.cpu().numpy())
         
-        # Save progress after each batch
-        current_difficulties = np.concatenate(all_batch_difficulties, axis=0)
-        np.savetxt('./tinyimagenet/difficulties.txt', current_difficulties, fmt='%.6f')
+        print(batch_difficulties.shape)
+        print(tokens.shape)
 
-    # Final difficulties are already saved
-    all_difficulties = np.concatenate(all_batch_difficulties, axis=0)
-    return all_difficulties
+        # Save each sample in batch to jsonl
+        for i in range(batch_size):
+            # Get label for current sample based on total processed samples
+            current_sample_idx = samples_processed + i
+            label = labels[current_sample_idx] if current_sample_idx < len(labels) else 0
+            
+            # Add label as first token
+            sample_tokens = [label] + tokens[i].cpu().numpy().tolist()
+            
+            sample = {
+                "tokens": sample_tokens,
+                "difficulties": batch_difficulties[i].cpu().numpy().tolist()
+            }
+            with open(f'./tinyimagenet/{prefix}.jsonl', 'a') as f:
+                f.write(json.dumps(sample) + '\n')
+        
+        total_samples += batch_size
+        samples_processed += batch_size
+
+def tokenize_data():
+    # Process training data
+    train_dataset = CustomTrain(
+        training_images_list_file="./tinyimagenet/train.txt",
+        size=64
+    )
+    process_dataset(train_dataset, batch_size=10, max_samples=600, prefix="train")
     
+    # Process test data
+    test_dataset = CustomTest(
+        test_images_list_file="./tinyimagenet/test.txt",
+        size=64
+    )
+    process_dataset(test_dataset, batch_size=10, max_samples=200, prefix="test")
+
 if __name__ == "__main__":
     tokenize_data()

@@ -1,7 +1,7 @@
 # lightning.pytorch==2.5.0.post0
 seed_everything: 23
 trainer:
-  accelerator: cuda
+  accelerator: mps
   strategy: auto
   devices: 1
   num_nodes: 1
@@ -10,7 +10,7 @@ trainer:
   callbacks:
   - class_path: lightning.pytorch.callbacks.ModelCheckpoint
     init_args:
-      dirpath: /home/ubuntu/cifar-testing/ndp/tinyimagenet/model
+      dirpath: ./tinyimagenet/diffvit
       filename: null
       monitor: null
       verbose: false
@@ -62,39 +62,25 @@ trainer:
   reload_dataloaders_every_n_epochs: 0
   default_root_dir: ${working_dir}
 model:
-  class_path: models.vqgan.VQMultiModel
+  class_path: models.vit.DifficultyViT
   init_args:
-    ddconfig:
-      double_z: false
-      ch: 128
-      num_res_blocks: 2
-      dropout: 0.0
-    lossconfig:
-      disc_conditional: false
-      disc_in_channels: 3
-      disc_start: 15000
-      disc_weight: 0.5
-      perceptual_weight: 0.5
-      codebook_weight: 0.5
-    n_embed: 4096
-    embed_dim: 8
-    dropout_step: 40000
-    token_drop:
-    - 32
-    - 8
+    vocab_size: 16585
+    resolutions:
+    - 1
     - 2
-    - 0
-    ckpt_path: null
-    ignore_keys: []
-    image_key: image
-    colorize_nlabels: null
-    monitor: null
-    remap: null
-    sane_index_shape: false
+    - 4
+    - 8
+    - 16
+    hidden_dim: 512
+    depth: 1
+    heads: 8
+    mlp_dim: 1024
+    dim_head: 128
+    use_flash: true
 data:
-  class_path: cli_single.TinyImageNetDataModule
+  class_path: cli_diffvit.TinyImageNetDataModule
   init_args:
-    batch_size: 128
+    batch_size: 8
     wrap: false
     num_workers: 8
 debug: false
