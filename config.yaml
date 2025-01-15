@@ -1,7 +1,7 @@
 # lightning.pytorch==2.5.0.post0
 seed_everything: 23
 trainer:
-  accelerator: mps
+  accelerator: cuda
   strategy: auto
   devices: 1
   num_nodes: 1
@@ -10,7 +10,7 @@ trainer:
   callbacks:
   - class_path: lightning.pytorch.callbacks.ModelCheckpoint
     init_args:
-      dirpath: ./tinyimagenet/diffvit
+      dirpath: ./tinyimagenet/ndpvit
       filename: null
       monitor: null
       verbose: false
@@ -21,7 +21,7 @@ trainer:
       auto_insert_metric_name: true
       every_n_train_steps: null
       train_time_interval: null
-      every_n_epochs: 1
+      every_n_epochs: 5
       save_on_train_epoch_end: null
       enable_version_counter: true
   - class_path: lightning.pytorch.callbacks.LearningRateMonitor
@@ -30,7 +30,7 @@ trainer:
       log_momentum: false
       log_weight_decay: false
   fast_dev_run: false
-  max_epochs: 50
+  max_epochs: 200
   min_epochs: null
   max_steps: -1
   min_steps: null
@@ -62,29 +62,29 @@ trainer:
   reload_dataloaders_every_n_epochs: 0
   default_root_dir: ${working_dir}
 model:
-  class_path: models.vit.DifficultyViT
+  class_path: models.vit.NDPViT
   init_args:
-    vocab_size: 16585
+    vocab_size: 2304
     resolutions:
     - 1
     - 2
     - 4
     - 8
     - 16
-    hidden_dim: 512
-    depth: 1
-    heads: 8
-    mlp_dim: 1024
-    dim_head: 128
+    hidden_dim: 768
+    depth: 12
+    heads: 12
+    mlp_dim: 1536
+    dim_head: 64
     use_flash: true
 data:
   class_path: cli_diffvit.TinyImageNetDataModule
   init_args:
-    batch_size: 8
+    batch_size: 128
     wrap: false
     num_workers: 8
 debug: false
 seed: 23
 optimizer: null
 lr_scheduler: null
-ckpt_path: null
+ckpt_path: ./tinyimagenet/ndpvit/last-v4.ckpt

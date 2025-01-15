@@ -28,12 +28,12 @@ def process_dataset(dataset, batch_size, max_samples, prefix):
         samples_processed = 0
         print(f"No saved data found for {prefix}, calculating from start...")
     
-    model = VQMultiModel.load_from_checkpoint("./tinyimagenet/last-v3.ckpt")
-    model.to("mps")
+    model = VQMultiModel.load_from_checkpoint("./tinyimagenet/model/last-v5.ckpt")
+    model.to("cuda")
     model.eval()
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=1, collate_fn=custom_collate)
-    loss = VQLPIPSWithDiscriminatorInference().to("mps")
+    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=8, collate_fn=custom_collate)
+    loss = VQLPIPSWithDiscriminatorInference().to("cuda")
 
     # Skip already processed batches
     batches_to_skip = samples_processed // batch_size
@@ -53,7 +53,7 @@ def process_dataset(dataset, batch_size, max_samples, prefix):
         x = model.get_input(batch,model.image_key)
 
         with torch.no_grad():
-            _, _, _, _, diff, info = model.encode(x.to("mps"))
+            _, _, _, _, diff, info = model.encode(x.to("cuda"))
             (_, _, info1), (_, _, info2), (_, _, info3), (_, _, info4) = info
             
             zero1 = model.quantize_1.get_codebook_entry(torch.zeros_like(info1), (batch_size, 16, 16, 8))
@@ -73,17 +73,17 @@ def process_dataset(dataset, batch_size, max_samples, prefix):
 
         images = torch.cat([y1.unsqueeze(0), y2.unsqueeze(0), y3.unsqueeze(0), y4.unsqueeze(0)], dim=0)
         tokens = torch.cat([
-            (info4.reshape(batch_size, -1) + 202),
-            (info3.reshape(batch_size, -1) + 202 + 8192),
-            (info2.reshape(batch_size, -1) + 202 + 8192 + 4096),
-            (info1.reshape(batch_size, -1) + 202 + 8192 + 4096 + 4096)
+            (info4.reshape(batch_size, -1) + 256),
+            (info3.reshape(batch_size, -1) + 256 + 512),
+            (info2.reshape(batch_size, -1) + 256 + 512 + 512),
+            (info1.reshape(batch_size, -1) + 256 + 512 + 512 + 512)
         ], dim=1)
 
         patch_difficulties = [torch.zeros(batch_size,2,2), torch.zeros(batch_size,4,4), torch.zeros(batch_size,8,8)]
 
         # fourth level 2x2
         patches = 0
-        x = x.to("mps")
+        x = x.to("cuda")
         base_losses = loss(x, images[0])
         for i in range(2):
             for j in range(2):
@@ -129,9 +129,6 @@ def process_dataset(dataset, batch_size, max_samples, prefix):
             patch_difficulties[2].reshape(-1, 64),  # Level 3: 8x8
             torch.zeros(batch_size, 256)
         ], dim=1)
-        
-        print(batch_difficulties.shape)
-        print(tokens.shape)
 
         # Save each sample in batch to jsonl
         for i in range(batch_size):
@@ -158,14 +155,15 @@ def tokenize_data():
         training_images_list_file="./tinyimagenet/train.txt",
         size=64
     )
-    process_dataset(train_dataset, batch_size=10, max_samples=600, prefix="train")
+    print(len(train_dataset))
+    process_dataset(train_dataset, batch_size=1000, max_samples=len(train_dataset), prefix="train")
     
     # Process test data
     test_dataset = CustomTest(
         test_images_list_file="./tinyimagenet/test.txt",
         size=64
     )
-    process_dataset(test_dataset, batch_size=10, max_samples=200, prefix="test")
+    process_dataset(test_dataset, batch_size=1000, max_samples=len(test_dataset), prefix="test")
 
 if __name__ == "__main__":
     tokenize_data()

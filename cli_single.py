@@ -90,7 +90,7 @@ class ImageLogger(Callback):
                         if self.clamp:
                             images[k] = torch.clamp(images[k], -1., 1.)
 
-            self.log_local('/home/ubuntu/cifar-testing/ndp/tinyimagenet/single_logs/', split, images,
+            self.log_local('/home/ubuntu/cifar-testing/ndp/tinyimagenet/single_logs_2/', split, images,
                            pl_module.global_step, pl_module.current_epoch, batch_idx)
 
             logger_log_images = self.logger_log_images.get(logger, lambda *args, **kwargs: None)

@@ -13,7 +13,7 @@ model:
       disc_weight: 0.5
       perceptual_weight: 0.5
       codebook_weight: 0.5
-    n_embed: 4096
+    n_embed: 1024
     embed_dim: 8
     token_drop: [32, 8, 2, 0]
 data:

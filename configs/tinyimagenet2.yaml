@@ -1,5 +1,5 @@
 model:
-  class_path: VQHierarchicalMultiModel
+  class_path: VQMultiModel
   init_args:
     ddconfig:
       double_z: false
@@ -13,7 +13,7 @@ model:
       disc_weight: 0.5
       perceptual_weight: 0.5
       codebook_weight: 0.5
-    n_embed: 4096
+    n_embed: 512
     embed_dim: 8
     token_drop: [32, 8, 2, 0]
 data:
@@ -29,7 +29,7 @@ trainer:
         save_top_k: -1
         every_n_epochs: 1
         save_last: true
-        dirpath: /home/ubuntu/cifar-testing/ndp/tinyimagenet_1/model
+        dirpath: /home/ubuntu/cifar-testing/ndp/tinyimagenet/model
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: step

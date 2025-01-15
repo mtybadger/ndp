@@ -30,7 +30,6 @@ class VQModel(pl.LightningModule):
                      "disc_weight": 0.5,
                      "codebook_weight": 1.0
                  },
-                 token_drop=[4, 2, 1, 0],
                  n_embed=8192,
                  embed_dim=8,
                  ckpt_path=None,
@@ -46,7 +45,6 @@ class VQModel(pl.LightningModule):
         self.automatic_optimization = False
         self.encoder = Encoder(**ddconfig)
         self.decoder = Decoder(**ddconfig)
-        self.token_drop = token_drop
         self.loss = VQLPIPSWithDiscriminator(**lossconfig)
         self.quantize = VectorQuantizer(n_embed, embed_dim, beta=0.25,
                                         remap=remap, sane_index_shape=sane_index_shape)
@@ -207,9 +205,9 @@ class VQMultiModel(pl.LightningModule):
                      "disc_in_channels": 3,
                      "disc_start": 200000,
                      "disc_weight": 0.5,
-                     "codebook_weight": 0.25
+                     "codebook_weight": 0.5
                  },
-                 n_embed=4096,
+                 n_embed=512,
                  embed_dim=8,
                  dropout_step=40000,
                  token_drop=[32, 8, 2, 0],
@@ -234,14 +232,14 @@ class VQMultiModel(pl.LightningModule):
         
         self.decoder = Decoder(**ddconfig, ch_mult=[1,2,2], in_channels=z_channels * 4, out_ch=3, z_channels=z_channels * 4, resolution=64, attn_resolutions=[16])
         
-        self.quantize_1 = VectorQuantizer(n_embed, embed_dim, beta=0.25,
-                                        remap=remap, sane_index_shape=sane_index_shape)
-        self.quantize_2 = VectorQuantizer(n_embed, embed_dim, beta=0.25,
-                                        remap=remap, sane_index_shape=sane_index_shape)
-        self.quantize_3 = VectorQuantizer(n_embed, embed_dim, beta=0.25,
-                                        remap=remap, sane_index_shape=sane_index_shape)
-        self.quantize_4 = VectorQuantizer(n_embed * 2, embed_dim, beta=0.25,
-                                        remap=remap, sane_index_shape=sane_index_shape)
+        self.quantize_1 = VectorQuantizer(n_embed, embed_dim, beta=0.5,
+                                        remap=remap, sane_index_shape=sane_index_shape, l2_norm=True)
+        self.quantize_2 = VectorQuantizer(n_embed, embed_dim, beta=0.5,
+                                        remap=remap, sane_index_shape=sane_index_shape, l2_norm=True)
+        self.quantize_3 = VectorQuantizer(n_embed, embed_dim, beta=0.5,
+                                        remap=remap, sane_index_shape=sane_index_shape, l2_norm=True)
+        self.quantize_4 = VectorQuantizer(n_embed, embed_dim, beta=0.5,
+                                        remap=remap, sane_index_shape=sane_index_shape, l2_norm=True)
         
         self.quant_conv_1 = torch.nn.Conv2d(z_channels, embed_dim, 1)
         self.quant_conv_2 = torch.nn.Conv2d(z_channels, embed_dim, 1)
@@ -577,7 +575,7 @@ class VQHierarchicalMultiModel(pl.LightningModule):
                      "disc_in_channels": 3,
                      "disc_start": 200000,
                      "disc_weight": 0.5,
-                     "codebook_weight": 0.25
+                     "codebook_weight": 0.5
                  },
                  n_embed=4096,
                  embed_dim=8,
@@ -613,7 +611,7 @@ class VQHierarchicalMultiModel(pl.LightningModule):
                                         remap=remap, sane_index_shape=sane_index_shape)
         self.quantize_3 = VectorQuantizer(n_embed, embed_dim, beta=0.25,
                                         remap=remap, sane_index_shape=sane_index_shape)
-        self.quantize_4 = VectorQuantizer(n_embed * 2, embed_dim, beta=0.25,
+        self.quantize_4 = VectorQuantizer(n_embed, embed_dim, beta=0.25,
                                         remap=remap, sane_index_shape=sane_index_shape)
         
         self.quant_conv_1 = torch.nn.Conv2d(z_channels, embed_dim, 1)

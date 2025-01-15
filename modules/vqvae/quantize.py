@@ -219,15 +219,18 @@ class VectorQuantizer2(nn.Module):
     # backwards compatibility we use the buggy version by default, but you can
     # specify legacy=False to fix it.
     def __init__(self, n_e, e_dim, beta, remap=None, unknown_index="random",
-                 sane_index_shape=False, legacy=True):
+                 sane_index_shape=False, legacy=True, l2_norm=False):
         super().__init__()
         self.n_e = n_e
         self.e_dim = e_dim
         self.beta = beta
         self.legacy = legacy
+        self.l2_norm = l2_norm
 
         self.embedding = nn.Embedding(self.n_e, self.e_dim)
         self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
+        if self.l2_norm:
+            self.embedding.weight.data = F.normalize(self.embedding.weight.data, p=2, dim=-1)
 
         self.remap = remap
         if self.remap is not None:
@@ -276,10 +279,17 @@ class VectorQuantizer2(nn.Module):
         z = rearrange(z, 'b c h w -> b h w c').contiguous()
         z_flattened = z.view(-1, self.e_dim)
         # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
+        
+        if self.l2_norm:
+            z = F.normalize(z, p=2, dim=-1)
+            z_flattened = F.normalize(z_flattened, p=2, dim=-1)
+            embedding = F.normalize(self.embedding.weight, p=2, dim=-1)
+        else:
+            embedding = self.embedding.weight
 
         d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
-            torch.sum(self.embedding.weight**2, dim=1) - 2 * \
-            torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
+            torch.sum(embedding**2, dim=1) - 2 * \
+            torch.einsum('bd,dn->bn', z_flattened, rearrange(embedding, 'n d -> d n'))
 
         min_encoding_indices = torch.argmin(d, dim=1)
         z_q = self.embedding(min_encoding_indices).view(z.shape)
@@ -318,8 +328,11 @@ class VectorQuantizer2(nn.Module):
             indices = self.unmap_to_all(indices)
             indices = indices.reshape(-1) # flatten again
 
-        # get quantized latent vectors
-        z_q = self.embedding(indices)
+        if self.l2_norm:
+            embedding = F.normalize(self.embedding.weight, p=2, dim=-1)
+        else:
+            embedding = self.embedding.weight
+        z_q = embedding[indices]  # (b*h*w, c)
 
         if shape is not None:
             z_q = z_q.view(shape)
