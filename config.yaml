@@ -2,15 +2,42 @@
 seed_everything: 23
 trainer:
   accelerator: cuda
-  strategy: auto
-  devices: 1
+  strategy:
+    class_path: lightning.pytorch.strategies.DDPStrategy
+    init_args:
+      accelerator: null
+      parallel_devices: null
+      cluster_environment: null
+      checkpoint_io: null
+      precision_plugin: null
+      ddp_comm_state: null
+      ddp_comm_hook: null
+      ddp_comm_wrapper: null
+      model_averaging_period: null
+      process_group_backend: null
+      timeout: 0:30:00
+      start_method: popen
+      output_device: null
+      dim: 0
+      broadcast_buffers: true
+      process_group: null
+      bucket_cap_mb: null
+      find_unused_parameters: true
+      check_reduction: false
+      gradient_as_bucket_view: false
+      static_graph: false
+      delay_all_reduce_named_params: null
+      param_to_hook_all_reduce: null
+      mixed_precision: null
+      device_mesh: null
+  devices: 8
   num_nodes: 1
   precision: bf16-mixed
   logger: null
   callbacks:
   - class_path: lightning.pytorch.callbacks.ModelCheckpoint
     init_args:
-      dirpath: ./tinyimagenet/ndpvit
+      dirpath: ./imagenet/ndpvit
       filename: null
       monitor: null
       verbose: false
@@ -64,7 +91,7 @@ trainer:
 model:
   class_path: models.vit.NDPViT
   init_args:
-    vocab_size: 2304
+    vocab_size: 5120
     resolutions:
     - 1
     - 2
@@ -78,7 +105,7 @@ model:
     dim_head: 64
     use_flash: true
 data:
-  class_path: cli_diffvit.TinyImageNetDataModule
+  class_path: cli_diffvit.ImageNetDataModule
   init_args:
     batch_size: 128
     wrap: false
@@ -87,4 +114,4 @@ debug: false
 seed: 23
 optimizer: null
 lr_scheduler: null
-ckpt_path: ./tinyimagenet/ndpvit/last-v4.ckpt
+ckpt_path: null

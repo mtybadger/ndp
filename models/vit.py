@@ -15,18 +15,18 @@ from models.vqgan import VQMultiModel
 
 Config = namedtuple('FlashAttentionConfig', ['enable_flash', 'enable_math', 'enable_mem_efficient'])
 
-blocks = torch.cat([
-    torch.zeros(1),  # 1x1 resolution
-    torch.ones(4),  # 2x2 resolution 
-    torch.full((16,), 2),  # 4x4 resolution
-    torch.full((64,), 3),  # 8x8 resolution
-    torch.full((512,), 4)  # 16x16 resolution
-], dim=0).to("cuda")
-# helpers
-def causal(b, h, q_idx, kv_idx):
-    # Hardcoded boundaries based on resolutions [1,2,4,8,16]
-    # boundaries[i+1] = boundaries[i] + res[i]^2
-    return blocks[q_idx] >= blocks[kv_idx]
+# blocks = torch.cat([
+#     torch.zeros(1),  # 1x1 resolution
+#     torch.ones(4),  # 2x2 resolution 
+#     torch.full((16,), 2),  # 4x4 resolution
+#     torch.full((64,), 3),  # 8x8 resolution
+#     torch.full((512,), 4)  # 16x16 resolution
+# ], dim=0).to("cuda")
+# # helpers
+# def causal(b, h, q_idx, kv_idx):
+#     # Hardcoded boundaries based on resolutions [1,2,4,8,16]
+#     # boundaries[i+1] = boundaries[i] + res[i]^2
+#     return blocks[q_idx] >= blocks[kv_idx]
 
 def pair(t):
     return t if isinstance(t, tuple) else (t, t)
@@ -67,9 +67,9 @@ class Attention(nn.Module):
         self.scale = dim_head ** -0.5
         self.norm = nn.LayerNorm(dim)
         
-        self.block_mask = create_block_mask(causal, B=None, H=None, Q_LEN=341, KV_LEN=341)
+        # self.block_mask = create_block_mask(causal, B=None, H=None, Q_LEN=341, KV_LEN=341)
         
-        print(self.block_mask)
+        # print(self.block_mask)
 
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
         self.to_out = nn.Linear(inner_dim, dim, bias = False)
@@ -80,8 +80,8 @@ class Attention(nn.Module):
         qkv = self.to_qkv(x).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
 
-        # out = F.scaled_dot_product_attention(q, k, v)
-        out = flex_attention(q, k, v, block_mask=self.block_mask)
+        out = F.scaled_dot_product_attention(q, k, v)
+        # out = flex_attention(q, k, v, block_mask=self.block_mask)
 
         out = rearrange(out, 'b h n d -> b n (h d)')
         return self.to_out(out)
@@ -199,25 +199,24 @@ class NDPViT(pl.LightningModule):
             (85, 341)  # Level 5: 16x16 tokens
         ]
         
-        self.tokenizer = VQMultiModel.load_from_checkpoint("./tinyimagenet/model/last-v5.ckpt")
+        self.tokenizer = VQMultiModel.load_from_checkpoint("./imagenet/model/last.ckpt")
         self.tokenizer.to("cuda")
         self.tokenizer.eval()
 
-        self.difficulty = DifficultyViT.load_from_checkpoint("./tinyimagenet/diffvit/last-v2.ckpt", vocab_size=2304, resolutions=[1, 2, 4, 8, 16], hidden_dim=512, depth=1, heads=8, mlp_dim=1024, dim_head=128)
+        self.difficulty = DifficultyViT.load_from_checkpoint("./imagenet/diffvit/last.ckpt", vocab_size=5120, resolutions=[1, 2, 4, 8, 16], hidden_dim=512, depth=1, heads=8, mlp_dim=1024, dim_head=128)
         self.difficulty.to("cuda")
         self.difficulty.eval()
         
-        # self.block_mask = create_block_mask(causal, B=None, H=None, Q_LEN=341, KV_LEN=341)
-        
-        T = 341  # or however large your max number of tokens is
-        adjacency = torch.full((T, 4), -1, dtype=torch.long, device="cuda")
+        # Create adjacency on CPU first
+        T = 341
+        adjacency = torch.full((T, 4), -1, dtype=torch.long)
         for i in range(T):
-            # get_subpatch_indices(i) returns a list of up to 4 subpatch indices
             inds = self.get_subpatch_indices(i)
             for j, sp_i in enumerate(inds):
-                adjacency[i, j] = sp_i  # if no subpatch, leave it as -1
-        print(adjacency)
-        self.adjacency = adjacency
+                adjacency[i, j] = sp_i
+        
+        # Register as buffer and move to current device
+        self.register_buffer('adjacency', adjacency, persistent=False)
 
     def find_level(self, i: int) -> int:
         """Returns which hierarchical level (0-5) the token index belongs to."""
@@ -352,7 +351,7 @@ class NDPViT(pl.LightningModule):
         rand_vals = torch.rand(batch["tokens"].shape[0], device=batch["tokens"].device)
         batch["tokens"][:, 0] = torch.where(rand_vals < 0.1,
                                           torch.tensor(2, device=batch["tokens"].device),
-                                          batch["tokens"][:, 0] + 56)
+                                          batch["tokens"][:, 0] + 8)
         loss = self.ndp_step(batch)
         self.log("train_loss", loss)
         return loss
@@ -382,19 +381,27 @@ class NDPViT(pl.LightningModule):
             # Get level of current index to determine valid token range
             level = self.find_level(idx)
             if level == 0:  # 2x2 level
-                valid_range = (256, 256+512)
+                valid_range = (1024, 1024+1024)
             elif level == 1:  # 4x4 level 
-                valid_range = (256+512, 256+512+512)
+                valid_range = (1024+1024, 1024+1024+1024)
             elif level == 2:  # 8x8 level
-                valid_range = (256+512+512, 256+512+512+512)
+                valid_range = (1024+1024+1024, 1024+1024+1024+1024)
             else:  # 16x16 level
-                valid_range = (256+512+512+512, 256+512+512+512+512)
+                valid_range = (1024+1024+1024+1024, 1024+1024+1024+1024+1024)
             # Mask logits outside valid range
             logits_masked = logits[0, subpatch_indices].clone()
             logits_masked[:, :valid_range[0]] = float('-inf')
             logits_masked[:, valid_range[1]:] = float('-inf')
-            probs = torch.softmax(logits_masked, dim=-1)
-            sampled_tokens = torch.argmax(probs, dim=-1)
+            
+            # Get top k values and indices
+            k = 5
+            top_k_values, top_k_indices = torch.topk(logits_masked, k, dim=-1)
+            
+            # Sample from top k using softmax probabilities
+            top_k_probs = torch.softmax(top_k_values, dim=-1)
+            sampled_indices = torch.multinomial(top_k_probs, num_samples=1).squeeze(-1)
+            sampled_tokens = torch.gather(top_k_indices, -1, sampled_indices.unsqueeze(-1)).squeeze(-1)
+            
             tokens[0, subpatch_indices] = sampled_tokens.to(dtype=tokens.dtype, device=tokens.device)
             difficulty = self.difficulty.forward(tokens.to("cuda"))
             # Create mask for non-zero tokens that have all zero subpatches
@@ -424,10 +431,10 @@ class NDPViT(pl.LightningModule):
                 with torch.no_grad():
                     # Get indices for each resolution level
                     # Only subtract offsets for non-zero tokens
-                    level1_tokens = torch.where(tokens[0, 1:5] != 0, tokens[0, 1:5] - 256, tokens[0, 1:5])  # 2x2
-                    level2_tokens = torch.where(tokens[0, 5:21] != 0, tokens[0, 5:21] - (256 + 512), tokens[0, 5:21])  # 4x4
-                    level3_tokens = torch.where(tokens[0, 21:85] != 0, tokens[0, 21:85] - (256 + 512 + 512), tokens[0, 21:85])  # 8x8
-                    level4_tokens = torch.where(tokens[0, 85:341] != 0, tokens[0, 85:341] - (256 + 512 + 512 + 512), tokens[0, 85:341])  # 16x16
+                    level1_tokens = torch.where(tokens[0, 1:5] != 0, tokens[0, 1:5] - 1024, tokens[0, 1:5])  # 2x2
+                    level2_tokens = torch.where(tokens[0, 5:21] != 0, tokens[0, 5:21] - (1024 + 1024), tokens[0, 5:21])  # 4x4
+                    level3_tokens = torch.where(tokens[0, 21:85] != 0, tokens[0, 21:85] - (1024 + 1024 + 1024), tokens[0, 21:85])  # 8x8
+                    level4_tokens = torch.where(tokens[0, 85:341] != 0, tokens[0, 85:341] - (1024 + 1024 + 1024 + 1024), tokens[0, 85:341])  # 16x16
                 
                     
                     # Convert to codebook entries

@@ -25,13 +25,13 @@ with open('./tinyimagenet/train.jsonl', 'r') as f:
         tokens = data['tokens']
         
         for token in tokens:
-            if 0 <= token < 256:
+            if 0 <= token < 1024:
                 region1_counts[token] += 1
-            elif 256 <= token < (512 + 256):
+            elif 1024 <= token < (1024 + 1024):
                 region2_counts[token] += 1
-            elif (512 + 256) <= token < (512 + 256 + 512):
+            elif (1024 + 1024) <= token < (1024 + 1024 + 1024):
                 region3_counts[token] += 1
-            elif (512 + 256 + 512) <= token < (512 + 256 + 512 + 512):
+            elif (1024 + 1024 + 1024) <= token < (1024 + 1024 + 1024 + 1024):
                 region4_counts[token] += 1
 
     # Calculate total tokens in each region
@@ -46,7 +46,7 @@ with open('./tinyimagenet/train.jsonl', 'r') as f:
     
     # Print codebook usage (what percentage of possible tokens in each region are actually used)
     print("\nCodebook Usage:")
-    print(f"Region 1: {len(region1_counts)/256*100:.2f}% of possible tokens used")
-    print(f"Region 2: {len(region2_counts)/512*100:.2f}% of possible tokens used")
-    print(f"Region 3: {len(region3_counts)/512*100:.2f}% of possible tokens used")
-    print(f"Region 4: {len(region4_counts)/512*100:.2f}% of possible tokens used")
+    print(f"Region 1: {len(region1_counts)/1024*100:.2f}% of possible tokens used")
+    print(f"Region 2: {len(region2_counts)/1024*100:.2f}% of possible tokens used")
+    print(f"Region 3: {len(region3_counts)/1024*100:.2f}% of possible tokens used")
+    print(f"Region 4: {len(region4_counts)/1024*100:.2f}% of possible tokens used")

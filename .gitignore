@@ -63,3 +63,6 @@ lightning_logs/
 *.txt
 
 *.jsonl
+
+.cache/
+.cache2/

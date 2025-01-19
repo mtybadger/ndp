@@ -122,7 +122,7 @@ class ImageLogger(Callback):
                 if self.clamp:
                     images = torch.clamp(images, -1., 1.)
                     
-            self.log_local('./tinyimagenet/ndp_logs/', split, images,
+            self.log_local('./imagenet/ndp_logs/', split, images,
                            pl_module.global_step, pl_module.current_epoch, batch_idx)
 
             logger_log_images = self.logger_log_images.get(logger, lambda *args, **kwargs: None)
@@ -158,6 +158,46 @@ class TinyImageNetDataModule(pl.LightningDataModule):
         self.dataset = load_dataset("json", data_files={
             "train": "./tinyimagenet/train.jsonl",
             "test": "./tinyimagenet/test.jsonl"
+        }).with_format("torch")
+
+        
+    def prepare_data(self):
+        pass
+
+    def setup(self, stage=None):
+        pass
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.dataset["train"],
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=True
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.dataset["test"],
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False
+        )
+
+    def test_dataloader(self):
+        return self.val_dataloader()
+
+
+
+class ImageNetDataModule(pl.LightningDataModule):
+    def __init__(self, batch_size=128,
+                 wrap=False, num_workers=8):
+        super().__init__()
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        
+        self.dataset = load_dataset("json", data_files={
+            "train": "./imagenet/train.jsonl",
+            "test": "./imagenet/test.jsonl"
         }).with_format("torch")
 
         

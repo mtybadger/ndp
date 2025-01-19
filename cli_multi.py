@@ -21,8 +21,7 @@ from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.utilities.rank_zero import rank_zero_only
 import torchvision
 
-torch.set_float32_matmul_precision('high')
-
+# torch.set_float32_matmul_precision('medium')
 
 class ImageLogger(Callback):
     def __init__(self, batch_frequency, max_images, clamp=True, increase_log_steps=True):
@@ -71,14 +70,27 @@ class ImageLogger(Callback):
                 images = pl_module.log_images(batch, split=split, pl_module=pl_module)
 
             for k in images:
-                N = min(images[k].shape[0], self.max_images)
-                images[k] = images[k][:N]
-                if isinstance(images[k], torch.Tensor):
-                    images[k] = images[k].detach().cpu()
-                    if self.clamp:
-                        images[k] = torch.clamp(images[k], -1., 1.)
+                if isinstance(images[k], (list, tuple)):
+                    # Concatenate all images in the tuple vertically
+                    N = min(images[k][0].shape[0], self.max_images)
+                    processed_images = []
+                    for img in images[k]:
+                        img = img[:N]
+                        if isinstance(img, torch.Tensor):
+                            img = img.detach().cpu()
+                            if self.clamp:
+                                img = torch.clamp(img, -1., 1.)
+                        processed_images.append(img)
+                    images[k] = torch.cat(processed_images, dim=2)  # Concatenate along height dimension
+                else:
+                    N = min(images[k].shape[0], self.max_images)
+                    images[k] = images[k][:N]
+                    if isinstance(images[k], torch.Tensor):
+                        images[k] = images[k].detach().cpu()
+                        if self.clamp:
+                            images[k] = torch.clamp(images[k], -1., 1.)
 
-            self.log_local('/shared/imagenet/multi_logs_4/', split, images,
+            self.log_local('/mnt/ndp/imagenet/vqgan_logs/', split, images,
                            pl_module.global_step, pl_module.current_epoch, batch_idx)
 
             logger_log_images = self.logger_log_images.get(logger, lambda *args, **kwargs: None)
@@ -127,11 +139,11 @@ class MyLightningCLI(LightningCLI):
         model = self.model
         datamodule = self.datamodule
         
-        self.trainer.logger = WandbLogger(project="vqgan_multi_2")
+        self.trainer.logger = WandbLogger(project="vqgan_imagenet_128")
         
         # configure learning rate
-        bs, base_lr = datamodule.batch_size, 1e-6
-        ngpu = trainer.num_devices * trainer.num_nodes
+        bs, base_lr = datamodule.batch_size, 5e-6
+        ngpu = trainer.num_devices
         accumulate_grad_batches = trainer.accumulate_grad_batches or 1
         print(f"accumulate_grad_batches = {accumulate_grad_batches}")
         trainer.accumulate_grad_batches = accumulate_grad_batches
@@ -147,12 +159,11 @@ class MyLightningCLI(LightningCLI):
         # If you want to set the learning rate dynamically:
         # e.g. model.learning_rate = ...
         pass
-    
-    from torch.utils.data import DataLoader
+
 
 class ImageNetDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size=8,
-                 wrap=False, num_workers=16):
+    def __init__(self, batch_size=128,
+                 wrap=False, num_workers=8):
         super().__init__()
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -160,13 +171,13 @@ class ImageNetDataModule(pl.LightningDataModule):
 
         # Directly instantiate the datasets
         self.train_dataset = CustomTrain(
-            training_images_list_file="/shared/imagenet/train.txt",
-            size=256
+            training_images_list_file="/mnt/ndp/imagenet/train.txt",
+            size=128
         )
         
         self.val_dataset = CustomTest(
-            test_images_list_file="/shared/imagenet/test.txt", 
-            size=256
+            test_images_list_file="/mnt/ndp/imagenet/test.txt", 
+            size=128
         )
 
         if self.wrap:
@@ -203,39 +214,13 @@ class ImageNetDataModule(pl.LightningDataModule):
 
 
 
-
 def main():
     # By default, the CLI subcommands are: fit, validate, test, predict
     # If you call `MyLightningCLI(..., run=True)`, it will automatically parse
     # and then run the subcommand. For example, `python cli_main.py fit --model.x=123`.
     MyLightningCLI(
-        model_class=VQMultiModel,        # or a wrapper that calls instantiate_from_config
-        datamodule_class=ImageNetDataModule,  # your custom DM
-        seed_everything_default=23,             # default seed
-        save_config_callback=None,              # turn off saving the config if you want
-        trainer_defaults={
-            "callbacks": [
-                ModelCheckpoint(save_top_k=-1, every_n_epochs=1, save_last=True, dirpath="/shared/imagenet/vqgan_multi_9_logs"),
-                LearningRateMonitor(logging_interval="step"),
-            ],
-            "default_root_dir": os.getcwd(),
-            "strategy": {
-                    "class_path": "lightning.pytorch.strategies.DDPStrategy",
-                    "init_args": {
-                        "process_group_backend": "nccl",
-                        # "find_unused_parameters": True,
-                        "gradient_as_bucket_view": True,
-                        "static_graph": True,
-                    }
-                },
-            "max_epochs": 40,
-            "default_root_dir": "/shared/imagenet/vqgan_multi_8_logs",
-            "precision": "bf16-mixed",
-            "devices": 8,
-            "num_nodes": 8,
-            "log_every_n_steps": 10,
-        },
         run=True,  # parse args + run subcommand (fit, test, etc.)
+        save_config_kwargs={"overwrite": True}
     )
 
 
