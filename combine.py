@@ -6,17 +6,17 @@ def combine_train_files():
     # Load the number of samples in the train dataset. 
     # (We rely on the environment having CustomTrain imported, as we cannot import here.)
     train_dataset = CustomTrain(
-        training_images_list_file="./imagenet/train.txt",
-        size=128
+        training_images_list_file="./imagenet_256/train.txt",
+        size=256
     )
     total_samples = len(train_dataset)
     print(f"Total training samples: {total_samples}")
 
     # Combine rank files into a single file
-    output_file = "./imagenet/train.jsonl"
+    output_file = "./imagenet_256/train.jsonl"
     with open(output_file, "w") as out_f:
-        for rank in range(8):
-            input_file = f"./imagenet/train_rank{rank}.jsonl"
+        for rank in range(24):
+            input_file = f"./imagenet_256/data/train_rank{rank}.jsonl"
             try:
                 with open(input_file, "r") as in_f:
                     for line in in_f:

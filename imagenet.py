@@ -5,7 +5,7 @@ from PIL import Image
 import os
 from tqdm import tqdm
 # Define minimum dimensions required for cropping
-MIN_SIZE = 128
+MIN_SIZE = 256
 
 # Define the transforms using Albumentations
 transform = albumentations.Compose([
@@ -15,8 +15,8 @@ transform = albumentations.Compose([
 ])
 
 # Create output directories if they don't exist
-os.makedirs("./imagenet/test", exist_ok=True)
-os.makedirs("./imagenet/train", exist_ok=True)
+os.makedirs("./imagenet_256/test", exist_ok=True)
+os.makedirs("./imagenet_256/train", exist_ok=True)
 
 def process_image(example, idx, split="test"):
     try:
@@ -31,7 +31,7 @@ def process_image(example, idx, split="test"):
         transformed_image = Image.fromarray(transformed_image)
         
         # Save the transformed image
-        save_path = os.path.join(f"./imagenet/{split}", f"image_{idx}.jpg")
+        save_path = os.path.join(f"./imagenet_256/{split}", f"image_{idx}.jpg")
         transformed_image.save(save_path, quality=95)
         
     except Exception as e:
@@ -41,29 +41,29 @@ def process_image(example, idx, split="test"):
 
 def create_auxiliary_files(dataset):
     # Create train.txt from actual files in directory
-    train_files = [f for f in os.listdir("./imagenet/train") if f.endswith('.jpg')]
-    with open("./imagenet/train.txt", "w") as f:
+    train_files = [f for f in os.listdir("./imagenet_256/train") if f.endswith('.jpg')]
+    with open("./imagenet_256/train.txt", "w") as f:
         for filename in train_files:
-            f.write(os.path.abspath(os.path.join("./imagenet/train", filename)) + "\n")
+            f.write(os.path.abspath(os.path.join("./imagenet_256/train", filename)) + "\n")
     
     # Create test.txt from actual files in directory
-    test_files = [f for f in os.listdir("./imagenet/test") if f.endswith('.jpg')]
-    with open("./imagenet/test.txt", "w") as f:
+    test_files = [f for f in os.listdir("./imagenet_256/test") if f.endswith('.jpg')]
+    with open("./imagenet_256/test.txt", "w") as f:
         for filename in test_files:
-            f.write(os.path.abspath(os.path.join("./imagenet/test", filename)) + "\n")
-            
+            f.write(os.path.abspath(os.path.join("./imagenet_256/test", filename)) + "\n")
+
     # Create labels.txt by matching image IDs to dataset labels
     # Get all labels in memory first
     train_labels = dataset['train']['label']
     test_labels = dataset['test']['label']
     
-    with open("./imagenet/labels_train.txt", "w") as f:
+    with open("./imagenet_256/labels_train.txt", "w") as f:
         for filename in tqdm(train_files):
             # Extract index from filename (e.g. "image_42.jpg" -> 42)
             idx = int(filename.split('_')[1].split('.')[0])
             f.write(f"{train_labels[idx]}\n")
             
-    with open("./imagenet/labels_test.txt", "w") as f:
+    with open("./imagenet_256/labels_test.txt", "w") as f:
         for filename in tqdm(test_files):
             # Extract index from filename (e.g. "image_42.jpg" -> 42) 
             idx = int(filename.split('_')[1].split('.')[0])
@@ -73,18 +73,18 @@ def create_auxiliary_files(dataset):
 print("Step 1: Downloading and processing images...")
 imagenet = datasets.load_dataset("ILSVRC/imagenet-1k", trust_remote_code=True, cache_dir="/mnt/ndp/.cache")
 
-# # Process images in parallel using datasets.map
-# imagenet['train'] = imagenet['train'].map(
-#     lambda x, idx: process_image(x, idx, "train"),
-#     with_indices=True,
-#     num_proc=48
-# )
+# Process images in parallel using datasets.map
+imagenet['train'] = imagenet['train'].map(
+    lambda x, idx: process_image(x, idx, "train"),
+    with_indices=True,
+    num_proc=64
+)
 
-# imagenet['test'] = imagenet['test'].map(
-#     lambda x, idx: process_image(x, idx, "test"),
-#     with_indices=True,
-#     num_proc=48
-# )
+imagenet['test'] = imagenet['test'].map(
+    lambda x, idx: process_image(x, idx, "test"),
+    with_indices=True,
+    num_proc=64
+)
 
 # Step 2: Create auxiliary files
 print("Step 2: Creating auxiliary files...")

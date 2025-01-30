@@ -20,9 +20,10 @@ trainer:
       output_device: null
       dim: 0
       broadcast_buffers: true
+      init_sync: true
       process_group: null
       bucket_cap_mb: null
-      find_unused_parameters: true
+      find_unused_parameters: false
       check_reduction: false
       gradient_as_bucket_view: false
       static_graph: false
@@ -31,24 +32,24 @@ trainer:
       mixed_precision: null
       device_mesh: null
   devices: 8
-  num_nodes: 1
+  num_nodes: 4
   precision: bf16-mixed
   logger: null
   callbacks:
   - class_path: lightning.pytorch.callbacks.ModelCheckpoint
     init_args:
-      dirpath: ./imagenet/ndpvit
+      dirpath: ./imagenet_256/ndpvit_b
       filename: null
       monitor: null
       verbose: false
-      save_last: true
+      save_last: false
       save_top_k: -1
       save_weights_only: false
       mode: min
       auto_insert_metric_name: true
       every_n_train_steps: null
       train_time_interval: null
-      every_n_epochs: 5
+      every_n_epochs: 30
       save_on_train_epoch_end: null
       enable_version_counter: true
   - class_path: lightning.pytorch.callbacks.LearningRateMonitor
@@ -57,7 +58,7 @@ trainer:
       log_momentum: false
       log_weight_decay: false
   fast_dev_run: false
-  max_epochs: 200
+  max_epochs: 300
   min_epochs: null
   max_steps: -1
   min_steps: null
@@ -68,7 +69,7 @@ trainer:
   limit_predict_batches: null
   overfit_batches: 0.0
   val_check_interval: null
-  check_val_every_n_epoch: 1
+  check_val_every_n_epoch: 5
   num_sanity_val_steps: null
   log_every_n_steps: 10
   enable_checkpointing: null
@@ -91,27 +92,28 @@ trainer:
 model:
   class_path: models.vit.NDPViT
   init_args:
-    vocab_size: 5120
+    vocab_size: 32832
+    num_classes: 1000
     resolutions:
     - 1
     - 2
     - 4
     - 8
     - 16
-    hidden_dim: 768
-    depth: 12
-    heads: 12
-    mlp_dim: 1536
+    hidden_dim: 1024
+    depth: 16
+    heads: 16
+    mlp_dim: 2048
     dim_head: 64
     use_flash: true
 data:
-  class_path: cli_diffvit.ImageNetDataModule
+  class_path: cli_ndpvit.ImageNetDataModule
   init_args:
-    batch_size: 128
+    batch_size: 32
     wrap: false
-    num_workers: 8
+    num_workers: 128
 debug: false
 seed: 23
 optimizer: null
 lr_scheduler: null
-ckpt_path: null
+ckpt_path: imagenet_256/ndpvit_b/epoch=89-step=112680.ckpt

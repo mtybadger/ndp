@@ -21,7 +21,7 @@ from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.utilities.rank_zero import rank_zero_only
 import torchvision
 
-# torch.set_float32_matmul_precision('medium')
+torch.set_float32_matmul_precision('high')
 
 class ImageLogger(Callback):
     def __init__(self, batch_frequency, max_images, clamp=True, increase_log_steps=True):
@@ -90,7 +90,7 @@ class ImageLogger(Callback):
                         if self.clamp:
                             images[k] = torch.clamp(images[k], -1., 1.)
 
-            self.log_local('/mnt/ndp/imagenet/vqgan_logs/', split, images,
+            self.log_local('/mnt/ndp/imagenet_256/vqgan_32768_16_logs/', split, images,
                            pl_module.global_step, pl_module.current_epoch, batch_idx)
 
             logger_log_images = self.logger_log_images.get(logger, lambda *args, **kwargs: None)
@@ -139,17 +139,18 @@ class MyLightningCLI(LightningCLI):
         model = self.model
         datamodule = self.datamodule
         
-        self.trainer.logger = WandbLogger(project="vqgan_imagenet_128")
+        self.trainer.logger = WandbLogger(project="vqgan_imagenet_256_32768_16")
         
         # configure learning rate
-        bs, base_lr = datamodule.batch_size, 5e-6
+        bs, base_lr = datamodule.batch_size, 6e-7
         ngpu = trainer.num_devices
+        n_node = trainer.num_nodes
         accumulate_grad_batches = trainer.accumulate_grad_batches or 1
         print(f"accumulate_grad_batches = {accumulate_grad_batches}")
         trainer.accumulate_grad_batches = accumulate_grad_batches
-        model.learning_rate = accumulate_grad_batches * ngpu * bs * base_lr
-        print("Setting learning rate to {:.2e} = {} (accumulate_grad_batches) * {} (num_gpus) * {} (batchsize) * {:.2e} (base_lr)".format(
-            model.learning_rate, accumulate_grad_batches, ngpu, bs, base_lr))
+        model.learning_rate = accumulate_grad_batches * ngpu * bs * base_lr * n_node
+        print("Setting learning rate to {:.2e} = {} (accumulate_grad_batches) * {} (num_gpus) * {} (batchsize) * {:.2e} (base_lr) * {} (num_nodes)".format(
+            model.learning_rate, accumulate_grad_batches, ngpu, bs, base_lr, n_node))
         
         # If you wanted to add or modify callbacks programmatically:
         # e.g. append your custom SetupCallback or ImageLogger:
@@ -171,26 +172,26 @@ class ImageNetDataModule(pl.LightningDataModule):
 
         # Directly instantiate the datasets
         self.train_dataset = CustomTrain(
-            training_images_list_file="/mnt/ndp/imagenet/train.txt",
-            size=128
+            training_images_list_file="/mnt/ndp/imagenet_256/train.txt",
+            size=256
         )
         
         self.val_dataset = CustomTest(
-            test_images_list_file="/mnt/ndp/imagenet/test.txt", 
-            size=128
+            test_images_list_file="/mnt/ndp/imagenet_256/test.txt", 
+            size=256
         )
 
         if self.wrap:
             self.train_dataset = WrappedDataset(self.train_dataset)
             self.val_dataset = WrappedDataset(self.val_dataset)
 
-    def prepare_data(self):
-        # Nothing to prepare since datasets are instantiated in __init__
-        pass
+    # def prepare_data(self):
+    #     # Nothing to prepare since datasets are instantiated in __init__
+    #     pass
 
-    def setup(self, stage=None):
-        # Nothing to setup since datasets are instantiated in __init__
-        pass
+    # def setup(self, stage=None):
+    #     # Nothing to setup since datasets are instantiated in __init__
+    #     pass
 
     def train_dataloader(self):
         return DataLoader(

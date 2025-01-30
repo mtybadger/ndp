@@ -1,0 +1,41 @@
+model:
+  class_path: models.vit.NDPViT
+  init_args:
+    vocab_size: 9216
+    resolutions: [1, 2, 4, 8, 16]
+    hidden_dim: 1280
+    depth: 20
+    heads: 20
+    mlp_dim: 2560
+    dim_head: 64
+data:
+  class_path: cli_diffvit.ImageNetDataModule
+  init_args:
+    batch_size: 32
+    num_workers: 16
+
+trainer:
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        save_top_k: -1
+        every_n_epochs: 30
+        save_last: false
+        dirpath: ./imagenet_256/ndpvit
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+  default_root_dir: ${working_dir}
+  max_epochs: 300
+  strategy:
+    class_path: lightning.pytorch.strategies.DDPStrategy
+    init_args:
+      find_unused_parameters: true
+  precision: bf16-mixed
+  check_val_every_n_epoch: 5
+  devices: 8
+  num_nodes: 3
+  log_every_n_steps: 10
+  accelerator: cuda
+
+seed_everything: 23

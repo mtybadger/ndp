@@ -15,7 +15,7 @@ def process_dataset(dataset, batch_size, max_samples, prefix, rank=None):
     try:
         samples_processed = 0
         existing_data = []
-        output_file = f'./imagenet/{prefix}.jsonl' if rank is None else f'./imagenet/{prefix}_rank{rank}.jsonl'
+        output_file = f'./imagenet_256/data/{prefix}.jsonl' if rank is None else f'./imagenet_256/data/{prefix}_rank{rank}.jsonl'
         with open(output_file, 'r') as f:
             for line in f:
                 existing_data.append(json.loads(line))
@@ -29,14 +29,15 @@ def process_dataset(dataset, batch_size, max_samples, prefix, rank=None):
     # -----------------------------
     # 1. Load your model
     # -----------------------------
-    model = VQMultiModel.load_from_checkpoint("./imagenet/model/last.ckpt")
+    cuda_rank = rank % 8
+    model = VQMultiModel.load_from_checkpoint("./imagenet_256/vqgan_8192_16/epoch=12-step=306958.ckpt", n_embed=2048)
     model = model.half()
-    model.to(f"cuda:{rank}")
+    model.to(f"cuda:{cuda_rank}")
     model.eval()
     # -----------------------------
     # 3. Prepare the LPIPS-like loss
     # -----------------------------
-    loss_fn = VQLPIPSWithDiscriminatorInference().to(f"cuda:{rank}")
+    loss_fn = VQLPIPSWithDiscriminatorInference().to(f"cuda:{cuda_rank}")
 
     dataloader = DataLoader(dataset, batch_size=batch_size, 
                             num_workers=8, collate_fn=custom_collate)
@@ -45,7 +46,7 @@ def process_dataset(dataset, batch_size, max_samples, prefix, rank=None):
     batches_to_skip = samples_processed // batch_size
 
     # Load labels
-    with open('./imagenet/labels_train.txt', 'r') as f:
+    with open('./imagenet_256/labels_train.txt', 'r') as f:
         labels = [int(line.strip()) for line in f if line.strip()]
 
     # If test set, override labels
@@ -64,7 +65,7 @@ def process_dataset(dataset, batch_size, max_samples, prefix, rank=None):
             break
 
         # Get inputs on GPU
-        x = model.get_input(batch, model.image_key).to(f"cuda:{rank}").half()
+        x = model.get_input(batch, model.image_key).to(f"cuda:{cuda_rank}").half()
 
         with torch.no_grad():
             _, _, _, _, diff, info = model.encode(x)
@@ -95,9 +96,9 @@ def process_dataset(dataset, batch_size, max_samples, prefix, rank=None):
         # (Note: each info is offset by 1024, but do confirm your offsets)
         tokens = torch.cat([
             (info4.reshape(x.shape[0], -1) + 1024),
-            (info3.reshape(x.shape[0], -1) + 2*1024),
-            (info2.reshape(x.shape[0], -1) + 3*1024),
-            (info1.reshape(x.shape[0], -1) + 4*1024),
+            (info3.reshape(x.shape[0], -1) + 1024+2048),
+            (info2.reshape(x.shape[0], -1) + 1024+2048+2048),
+            (info1.reshape(x.shape[0], -1) + 1024+2048+2048+2048),
         ], dim=1)
 
         # We'll store patch difficulties
@@ -156,7 +157,7 @@ def process_dataset(dataset, batch_size, max_samples, prefix, rank=None):
         # -----------------------------
         # 6. Save each sample in the batch
         # -----------------------------
-        output_file = f'./imagenet/{prefix}.jsonl' if rank is None else f'./imagenet/{prefix}_rank{rank}.jsonl'
+        output_file = f'./imagenet_256/data/{prefix}.jsonl' if rank is None else f'./imagenet_256/data/{prefix}_rank{rank}.jsonl'
         for i in range(x.shape[0]):
             current_sample_idx = samples_processed + i
             label = labels[current_sample_idx] if current_sample_idx < len(labels) else 0
@@ -177,32 +178,32 @@ def process_dataset(dataset, batch_size, max_samples, prefix, rank=None):
 
 def tokenize_data():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--rank', type=int, required=True, help='Rank of process (0-7)')
+    parser.add_argument('--rank', type=int, required=True, help='Rank of process (0-23)')
     args = parser.parse_args()
 
-    # if args.rank < 0 or args.rank > 7:
-    #     raise ValueError("Rank must be between 0 and 7")
+    if args.rank < 0 or args.rank > 23:
+        raise ValueError("Rank must be between 0 and 23")
 
     # # Process training data
     # train_dataset = CustomTrain(
-    #     training_images_list_file="./imagenet/train.txt",
-    #     size=128
+    #     training_images_list_file="./imagenet_256/train.txt",
+    #     size=256
     # )
     # total_samples = len(train_dataset)
-    # chunk_size = total_samples // 8
+    # chunk_size = total_samples // 24
     # start_idx = args.rank * chunk_size
-    # end_idx = start_idx + chunk_size if args.rank < 7 else total_samples
+    # end_idx = start_idx + chunk_size if args.rank < 23 else total_samples
     
     # print(f"Processing rank {args.rank}, samples {start_idx} to {end_idx}")
-    # process_dataset(train_dataset, batch_size=512, max_samples=end_idx-start_idx, prefix="train", rank=args.rank)
+    # process_dataset(train_dataset, batch_size=256, max_samples=end_idx-start_idx, prefix="train", rank=args.rank)
 
     # Process test data only on rank 0
     if args.rank == 0:
         test_dataset = CustomTest(
-            test_images_list_file="./imagenet/test.txt",
-            size=128
+            test_images_list_file="./imagenet_256/test.txt",
+            size=256
         )
-        process_dataset(test_dataset, batch_size=512, max_samples=len(test_dataset), prefix="test", rank=args.rank)
+        process_dataset(test_dataset, batch_size=256, max_samples=len(test_dataset), prefix="test", rank=args.rank)
 
 
 if __name__ == "__main__":

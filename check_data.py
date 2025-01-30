@@ -4,9 +4,10 @@ from collections import defaultdict
 from tqdm import tqdm
 
 # Read first 1% of lines from train.jsonl
-with open('./tinyimagenet/train.jsonl', 'r') as f:
+with open('./imagenet_256/train.jsonl', 'r') as f:
     # Get total line count first
     total_lines = sum(1 for _ in f)
+    print(f"Total lines: {total_lines}")
     f.seek(0)
     
     # Initialize counters for each region
@@ -25,13 +26,13 @@ with open('./tinyimagenet/train.jsonl', 'r') as f:
         tokens = data['tokens']
         
         for token in tokens:
-            if 0 <= token < 1024:
+            if 1024 <= token < 1024 + 2048:
                 region1_counts[token] += 1
-            elif 1024 <= token < (1024 + 1024):
+            elif 1024 + 2048 <= token < 1024 + 2048 + 2048:
                 region2_counts[token] += 1
-            elif (1024 + 1024) <= token < (1024 + 1024 + 1024):
+            elif 1024 + 2048 + 2048 <= token < 1024 + 2048 + 2048 + 2048:
                 region3_counts[token] += 1
-            elif (1024 + 1024 + 1024) <= token < (1024 + 1024 + 1024 + 1024):
+            elif 1024 + 2048 + 2048 + 2048 <= token < 1024 + 2048 + 2048 + 2048 + 2048:
                 region4_counts[token] += 1
 
     # Calculate total tokens in each region
@@ -46,7 +47,7 @@ with open('./tinyimagenet/train.jsonl', 'r') as f:
     
     # Print codebook usage (what percentage of possible tokens in each region are actually used)
     print("\nCodebook Usage:")
-    print(f"Region 1: {len(region1_counts)/1024*100:.2f}% of possible tokens used")
-    print(f"Region 2: {len(region2_counts)/1024*100:.2f}% of possible tokens used")
-    print(f"Region 3: {len(region3_counts)/1024*100:.2f}% of possible tokens used")
-    print(f"Region 4: {len(region4_counts)/1024*100:.2f}% of possible tokens used")
+    print(f"Region 1: {len(region1_counts)/2048*100:.2f}% of possible tokens used")
+    print(f"Region 2: {len(region2_counts)/2048*100:.2f}% of possible tokens used")
+    print(f"Region 3: {len(region3_counts)/2048*100:.2f}% of possible tokens used")
+    print(f"Region 4: {len(region4_counts)/2048*100:.2f}% of possible tokens used")

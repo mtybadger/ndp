@@ -20,3 +20,5 @@ class DummyCondStage:
     @staticmethod
     def to_rgb(c: Tensor):
         return c
+
+
