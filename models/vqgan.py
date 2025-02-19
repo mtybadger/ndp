@@ -1158,14 +1158,24 @@ class IBQSharedModel(pl.LightningModule):
         
         self.decoder = Decoder(**ddconfig, ch_mult=[1,2,4], in_channels=z_channels, out_ch=3, z_channels=z_channels, resolution=64, attn_resolutions=[16])
         
-        # self.quantize = IndexPropagationQuantize(n_embed, embed_dim, beta=0.5, use_entropy_loss=True,
-        #                                 remap=remap)
-        self.quantize = VectorQuantizer(n_embed, embed_dim, beta=0.5,
-                                        remap=remap, sane_index_shape=sane_index_shape, l2_norm=True)
+        self.quantize = IndexPropagationQuantize(n_embed, embed_dim, beta=0.5, use_entropy_loss=True,
+                                        remap=remap)
+        # self.quantize = VectorQuantizer(n_embed, embed_dim, beta=0.5,
+        #                                 remap=remap, sane_index_shape=sane_index_shape, l2_norm=True)
         
-        self.quant_conv = torch.nn.Conv2d(z_channels, embed_dim, 1)
+        # self.quant_conv = torch.nn.Conv2d(z_channels, embed_dim, 1)
         
-        self.post_quant_conv = torch.nn.Conv2d(embed_dim, z_channels, 1)
+        # self.post_quant_conv = torch.nn.Conv2d(embed_dim, z_channels, 1)
+        
+        self.quant_conv_1 = torch.nn.Conv2d(z_channels, embed_dim, 1)
+        self.quant_conv_2 = torch.nn.Conv2d(z_channels, embed_dim, 1)
+        self.quant_conv_3 = torch.nn.Conv2d(z_channels, embed_dim, 1)
+        self.quant_conv_4 = torch.nn.Conv2d(z_channels, embed_dim, 1)
+        
+        self.post_quant_conv_1 = torch.nn.Conv2d(embed_dim, z_channels, 1)
+        self.post_quant_conv_2 = torch.nn.Conv2d(embed_dim, z_channels, 1)
+        self.post_quant_conv_3 = torch.nn.Conv2d(embed_dim, z_channels, 1)
+        self.post_quant_conv_4 = torch.nn.Conv2d(embed_dim, z_channels, 1)
         
         self.dropout_step = dropout_step
         
@@ -1200,16 +1210,16 @@ class IBQSharedModel(pl.LightningModule):
         enc_3 = self.encoder_3(enc_2)
         enc_4 = self.encoder_4(enc_3)
         
-        conv_4 = self.quant_conv(enc_4)
+        conv_4 = self.quant_conv_4(enc_4)
         quant_4, emb_loss_4, info_4 = self.quantize(conv_4)
         
-        conv_3 = self.quant_conv(enc_3)
+        conv_3 = self.quant_conv_3(enc_3)
         quant_3, emb_loss_3, info_3 = self.quantize(conv_3)
         
-        conv_2 = self.quant_conv(enc_2)
+        conv_2 = self.quant_conv_2(enc_2)
         quant_2, emb_loss_2, info_2 = self.quantize(conv_2)
         
-        conv_1 = self.quant_conv(enc_1)
+        conv_1 = self.quant_conv_1(enc_1)
         quant_1, emb_loss_1, info_1 = self.quantize(conv_1)
         
         return quant_1, quant_2, quant_3, quant_4, emb_loss_1 + emb_loss_2 + emb_loss_3 + emb_loss_4, (info_1, info_2, info_3, info_4)
@@ -1219,10 +1229,10 @@ class IBQSharedModel(pl.LightningModule):
         # quant3 = quant3.repeat(1, 1, 4, 4)
         # quant4 = quant4.repeat(1, 1, 8, 8)
         
-        quant1 = self.post_quant_conv(quant1)
-        quant2 = self.post_quant_conv(quant2)
-        quant3 = self.post_quant_conv(quant3)
-        quant4 = self.post_quant_conv(quant4)
+        quant1 = self.post_quant_conv_1(quant1)
+        quant2 = self.post_quant_conv_2(quant2)
+        quant3 = self.post_quant_conv_3(quant3)
+        quant4 = self.post_quant_conv_4(quant4)
         
         quant2 = F.interpolate(quant2, scale_factor=2, mode='nearest')
         quant3 = F.interpolate(quant3, scale_factor=4, mode='nearest')
@@ -1333,7 +1343,7 @@ class IBQSharedModel(pl.LightningModule):
         quant_params = list(self.quantize.parameters())
         
         # 3. Pre/post quantization convolutions
-        conv_params = list(self.quant_conv.parameters()) + list(self.post_quant_conv.parameters())
+        conv_params = list(self.quant_conv_1.parameters()) + list(self.quant_conv_2.parameters()) + list(self.quant_conv_3.parameters()) + list(self.quant_conv_4.parameters()) + list(self.post_quant_conv_1.parameters()) + list(self.post_quant_conv_2.parameters()) + list(self.post_quant_conv_3.parameters()) + list(self.post_quant_conv_4.parameters())
         
         # Combine all parameters
         opt_ae = torch.optim.AdamW(

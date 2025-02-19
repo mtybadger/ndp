@@ -38,7 +38,7 @@ trainer:
   callbacks:
   - class_path: lightning.pytorch.callbacks.ModelCheckpoint
     init_args:
-      dirpath: /mnt/ndp/imagenet_64/vqgan_64_16384_16
+      dirpath: /mnt/ndp/imagenet_64/vqgan_64_16384_16_ibq
       filename: null
       monitor: null
       verbose: false
@@ -100,13 +100,13 @@ model:
     lossconfig:
       disc_conditional: false
       disc_in_channels: 3
-      disc_start: 30300
-      disc_weight: 0.125
+      disc_start: 10100
+      disc_weight: 0.5
       perceptual_weight: 1.0
       codebook_weight: 1.0
       entropy_weight: 0.05
     n_embed: 16384
-    embed_dim: 8
+    embed_dim: 256
     dropout_step: 40000
     ckpt_path: null
     ignore_keys: []
@@ -126,4 +126,4 @@ debug: false
 seed: 23
 optimizer: null
 lr_scheduler: null
-ckpt_path: /mnt/ndp/imagenet_64/vqgan_64_16384_16/epoch=3-step=20024.ckpt
+ckpt_path: /mnt/ndp/imagenet_64/vqgan_64_16384_16_ibq/epoch=1-step=10012.ckpt

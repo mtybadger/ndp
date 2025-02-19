@@ -9,13 +9,13 @@ model:
     lossconfig:
       disc_conditional: false
       disc_in_channels: 3
-      disc_start: 30300
-      disc_weight: 0.125
+      disc_start: 10100
+      disc_weight: 0.5
       perceptual_weight: 1.0
       codebook_weight: 1.0
       entropy_weight: 0.05
     n_embed: 16384
-    embed_dim: 8
+    embed_dim: 256
 data:
   class_path: cli_multi.ImageNet64DataModule
   init_args:
@@ -28,7 +28,7 @@ trainer:
       init_args:
         save_top_k: -1
         every_n_epochs: 1
-        dirpath: /mnt/ndp/imagenet_64/vqgan_64_16384_16
+        dirpath: /mnt/ndp/imagenet_64/vqgan_64_16384_16_ibq
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: step
