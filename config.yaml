@@ -23,7 +23,7 @@ trainer:
       init_sync: true
       process_group: null
       bucket_cap_mb: null
-      find_unused_parameters: false
+      find_unused_parameters: true
       check_reduction: false
       gradient_as_bucket_view: false
       static_graph: false
@@ -32,24 +32,24 @@ trainer:
       mixed_precision: null
       device_mesh: null
   devices: 8
-  num_nodes: 4
+  num_nodes: 1
   precision: bf16-mixed
   logger: null
   callbacks:
   - class_path: lightning.pytorch.callbacks.ModelCheckpoint
     init_args:
-      dirpath: ./imagenet_256/ndpvit_b
+      dirpath: /mnt/ndp/imagenet_64/vqgan_64_16384_16
       filename: null
       monitor: null
       verbose: false
-      save_last: false
+      save_last: null
       save_top_k: -1
       save_weights_only: false
       mode: min
       auto_insert_metric_name: true
       every_n_train_steps: null
       train_time_interval: null
-      every_n_epochs: 30
+      every_n_epochs: 1
       save_on_train_epoch_end: null
       enable_version_counter: true
   - class_path: lightning.pytorch.callbacks.LearningRateMonitor
@@ -58,7 +58,7 @@ trainer:
       log_momentum: false
       log_weight_decay: false
   fast_dev_run: false
-  max_epochs: 300
+  max_epochs: 50
   min_epochs: null
   max_steps: -1
   min_steps: null
@@ -69,7 +69,7 @@ trainer:
   limit_predict_batches: null
   overfit_batches: 0.0
   val_check_interval: null
-  check_val_every_n_epoch: 5
+  check_val_every_n_epoch: 1
   num_sanity_val_steps: null
   log_every_n_steps: 10
   enable_checkpointing: null
@@ -90,30 +90,40 @@ trainer:
   reload_dataloaders_every_n_epochs: 0
   default_root_dir: ${working_dir}
 model:
-  class_path: models.vit.NDPViT
+  class_path: models.vqgan.IBQSharedModel
   init_args:
-    vocab_size: 32832
-    num_classes: 1000
-    resolutions:
-    - 1
-    - 2
-    - 4
-    - 8
-    - 16
-    hidden_dim: 1024
-    depth: 16
-    heads: 16
-    mlp_dim: 2048
-    dim_head: 64
-    use_flash: true
+    ddconfig:
+      double_z: false
+      ch: 128
+      num_res_blocks: 2
+      dropout: 0.0
+    lossconfig:
+      disc_conditional: false
+      disc_in_channels: 3
+      disc_start: 30300
+      disc_weight: 0.125
+      perceptual_weight: 1.0
+      codebook_weight: 1.0
+      entropy_weight: 0.05
+    n_embed: 16384
+    embed_dim: 8
+    dropout_step: 40000
+    ckpt_path: null
+    ignore_keys: []
+    image_key: image
+    colorize_nlabels: null
+    learning_rate: 0.00015
+    monitor: null
+    remap: null
+    sane_index_shape: false
 data:
-  class_path: cli_ndpvit.ImageNetDataModule
+  class_path: cli_multi.ImageNet64DataModule
   init_args:
-    batch_size: 32
+    batch_size: 64
     wrap: false
-    num_workers: 128
+    num_workers: 64
 debug: false
 seed: 23
 optimizer: null
 lr_scheduler: null
-ckpt_path: imagenet_256/ndpvit_b/epoch=89-step=112680.ckpt
+ckpt_path: /mnt/ndp/imagenet_64/vqgan_64_16384_16/epoch=3-step=20024.ckpt

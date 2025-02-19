@@ -52,7 +52,7 @@ class MyLightningCLI(LightningCLI):
         self.trainer.logger = WandbLogger(project="ndpvit_256_b")
         
         # configure learning rate
-        bs, base_lr = datamodule.batch_size, 0.5e-7
+        bs, base_lr = datamodule.batch_size, 2e-7
         ngpu = trainer.num_devices
         num_nodes = trainer.num_nodes
         accumulate_grad_batches = trainer.accumulate_grad_batches or 1

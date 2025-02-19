@@ -35,10 +35,11 @@ class VQLPIPSWithDiscriminator(nn.Module):
     def __init__(self, disc_start, codebook_weight=1.0, pixelloss_weight=1.0,
                  disc_num_layers=3, disc_in_channels=3, disc_factor=1.0, disc_weight=1.0,
                  perceptual_weight=1.0, use_actnorm=False, disc_conditional=False,
-                 disc_ndf=64, disc_loss="hinge"):
+                 disc_ndf=64, disc_loss="hinge", entropy_weight=0.5):
         super().__init__()
         assert disc_loss in ["hinge", "vanilla"]
         self.codebook_weight = codebook_weight
+        self.entropy_weight = entropy_weight
         self.pixel_weight = pixelloss_weight
         self.perceptual_loss = LPIPS().eval()
         self.perceptual_weight = perceptual_weight
@@ -106,10 +107,21 @@ class VQLPIPSWithDiscriminator(nn.Module):
                 d_weight = torch.tensor(0.0)
 
             disc_factor = adopt_weight(self.disc_factor, global_step, threshold=self.discriminator_iter_start)
-            loss = nll_loss + d_weight * disc_factor * g_loss + self.codebook_weight * codebook_loss.mean()
+            
+            use_entropy_loss = isinstance(codebook_loss, tuple)
+            if use_entropy_loss:
+                entropy_loss = codebook_loss[-1]
+                codebook_loss = codebook_loss[0]
+                loss = nll_loss + d_weight * disc_factor * g_loss + self.codebook_weight * codebook_loss.mean() + self.entropy_weight * entropy_loss.mean()
+            else:
+                loss = nll_loss + d_weight * disc_factor * g_loss + self.codebook_weight * codebook_loss.mean()
+                entropy_loss = torch.zeros_like(codebook_loss)
+            
+            
 
             log = {"{}/total_loss".format(split): loss.clone().detach().mean(),
                    "{}/quant_loss".format(split): codebook_loss.detach().mean(),
+                   "{}/entropy_loss".format(split): entropy_loss.detach().mean(),
                    "{}/nll_loss".format(split): nll_loss.detach().mean(),
                    "{}/rec_loss".format(split): rec_loss.detach().mean(),
                    "{}/p_loss".format(split): p_loss.detach().mean(),

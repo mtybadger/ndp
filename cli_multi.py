@@ -12,7 +12,7 @@ from main import (
 from data.utils import custom_collate
 from data.custom import CustomTrain, CustomTest
 from torch.utils.data import DataLoader
-from models.vqgan import VQMultiModel
+from models.vqgan import VQMultiModel, IBQSharedModel
 import numpy as np
 from PIL import Image
 from torch.utils.data import DataLoader
@@ -90,7 +90,7 @@ class ImageLogger(Callback):
                         if self.clamp:
                             images[k] = torch.clamp(images[k], -1., 1.)
 
-            self.log_local('/mnt/ndp/imagenet_256/vqgan_32768_16_logs/', split, images,
+            self.log_local('/mnt/ndp/imagenet_64/vqgan_64_16384_16_logs/', split, images,
                            pl_module.global_step, pl_module.current_epoch, batch_idx)
 
             logger_log_images = self.logger_log_images.get(logger, lambda *args, **kwargs: None)
@@ -139,10 +139,10 @@ class MyLightningCLI(LightningCLI):
         model = self.model
         datamodule = self.datamodule
         
-        self.trainer.logger = WandbLogger(project="vqgan_imagenet_256_32768_16")
+        self.trainer.logger = WandbLogger(project="vqgan_imagenet_64_16384_16")
         
         # configure learning rate
-        bs, base_lr = datamodule.batch_size, 6e-7
+        bs, base_lr = datamodule.batch_size, 4e-7
         ngpu = trainer.num_devices
         n_node = trainer.num_nodes
         accumulate_grad_batches = trainer.accumulate_grad_batches or 1
@@ -179,6 +179,110 @@ class ImageNetDataModule(pl.LightningDataModule):
         self.val_dataset = CustomTest(
             test_images_list_file="/mnt/ndp/imagenet_256/test.txt", 
             size=256
+        )
+
+        if self.wrap:
+            self.train_dataset = WrappedDataset(self.train_dataset)
+            self.val_dataset = WrappedDataset(self.val_dataset)
+
+    # def prepare_data(self):
+    #     # Nothing to prepare since datasets are instantiated in __init__
+    #     pass
+
+    # def setup(self, stage=None):
+    #     # Nothing to setup since datasets are instantiated in __init__
+    #     pass
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=True,
+            collate_fn=custom_collate
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            collate_fn=custom_collate
+        )
+
+    def test_dataloader(self):
+        return self.val_dataloader()
+
+
+class ImageNet128DataModule(pl.LightningDataModule):
+    def __init__(self, batch_size=128,
+                 wrap=False, num_workers=8):
+        super().__init__()
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.wrap = wrap
+
+        # Directly instantiate the datasets
+        self.train_dataset = CustomTrain(
+            training_images_list_file="/mnt/ndp/imagenet_128/train.txt",
+            size=128
+        )
+        
+        self.val_dataset = CustomTest(
+            test_images_list_file="/mnt/ndp/imagenet_128/test.txt", 
+            size=128
+        )
+
+        if self.wrap:
+            self.train_dataset = WrappedDataset(self.train_dataset)
+            self.val_dataset = WrappedDataset(self.val_dataset)
+
+    # def prepare_data(self):
+    #     # Nothing to prepare since datasets are instantiated in __init__
+    #     pass
+
+    # def setup(self, stage=None):
+    #     # Nothing to setup since datasets are instantiated in __init__
+    #     pass
+
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=True,
+            collate_fn=custom_collate
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            collate_fn=custom_collate
+        )
+
+    def test_dataloader(self):
+        return self.val_dataloader()
+
+
+class ImageNet64DataModule(pl.LightningDataModule):
+    def __init__(self, batch_size=128,
+                 wrap=False, num_workers=8):
+        super().__init__()
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.wrap = wrap
+
+        # Directly instantiate the datasets
+        self.train_dataset = CustomTrain(
+            training_images_list_file="/mnt/ndp/imagenet_64/train.txt",
+            size=64
+        )
+        
+        self.val_dataset = CustomTest(
+            test_images_list_file="/mnt/ndp/imagenet_64/test.txt", 
+            size=64
         )
 
         if self.wrap:

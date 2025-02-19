@@ -1,10 +1,10 @@
 from collections import namedtuple
 from packaging import version
-
+from muon import Muon
 import torch
 import torch.nn.functional as F
 from torch import nn
-
+import math
 from einops import rearrange
 from einops.layers.torch import Rearrange
 import lightning.pytorch as pl
@@ -14,6 +14,7 @@ from typing import Union
 from torchvision.transforms import v2
 import torchvision
 from torch.optim import lr_scheduler
+from lightning.pytorch.utilities import grad_norm
 # constants
 
 Config = namedtuple('FlashAttentionConfig', ['enable_flash', 'enable_math', 'enable_mem_efficient'])
@@ -67,9 +68,16 @@ class Attention(nn.Module):
         self.scale = dim_head ** -0.5
         self.norm = nn.LayerNorm(dim)
         
-        # self.block_mask = create_block_mask(causal, B=None, H=None, Q_LEN=341, KV_LEN=341)
-        
-        # print(self.block_mask)
+        block_mask = torch.zeros((341, 341))
+        blocks = torch.cat([
+            torch.zeros(1),  # 1x1 resolution
+            torch.ones(4),  # 2x2 resolution 
+            torch.full((16,), 2),  # 4x4 resolution
+            torch.full((64,), 3),  # 8x8 resolution
+            torch.full((256,), 4)  # 16x16 resolution
+        ], dim=0)
+        block_mask = blocks.unsqueeze(0) <= blocks.unsqueeze(1)
+        self.register_buffer("block_mask", block_mask)
 
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
         self.to_out = nn.Linear(inner_dim, dim, bias = False)
@@ -80,7 +88,7 @@ class Attention(nn.Module):
         qkv = self.to_qkv(x).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
 
-        out = F.scaled_dot_product_attention(q, k, v, dropout_p=0.1)
+        out = F.scaled_dot_product_attention(q, k, v, dropout_p=0.1, attn_mask=self.block_mask)
         # out = flex_attention(q, k, v, block_mask=self.block_mask)
 
         out = rearrange(out, 'b h n d -> b n (h d)')
@@ -110,6 +118,7 @@ class AdaLNTransformer(nn.Module):
                 AdaLNAttention(dim, heads = heads, dim_head = dim_head, use_flash = use_flash),
                 AdaLNFeedForward(dim, mlp_dim)
             ]))
+
     def forward(self, x, cond):
         for attn, ff in self.layers:
             x = attn(x, cond) + x
@@ -145,10 +154,10 @@ class AdaLNBeforeHead(nn.Module):
         super().__init__()
         self.dim = dim
         self.ln_wo_grad = nn.LayerNorm(dim, elementwise_affine=False)
-        self.ada_lin = nn.Sequential(nn.SiLU(inplace=False), nn.Linear(dim, 2*dim))
+        self.ada_lin = nn.Sequential(nn.SiLU(inplace=False), nn.Linear(dim, 3*dim))
     
     def forward(self, x_BLC: torch.Tensor, cond_BD: torch.Tensor):
-        scale, shift = self.ada_lin(cond_BD).view(-1, 1, 2, self.dim).unbind(2)
+        gamma, scale, shift = self.ada_lin(cond_BD).view(-1, 1, 3, self.dim).unbind(2)
         return self.ln_wo_grad(x_BLC).mul(scale.add(1)).add_(shift)
     
 class AdaLNAttention(nn.Module):
@@ -161,6 +170,7 @@ class AdaLNAttention(nn.Module):
         self.dim = dim
         lin = nn.Linear(dim, 3*dim)
         self.ada_lin = nn.Sequential(nn.SiLU(inplace=False), lin)
+
         # Pre-compute causal mask once
         block_mask = torch.zeros((341, 341))
         blocks = torch.cat([
@@ -176,6 +186,8 @@ class AdaLNAttention(nn.Module):
 
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
         self.to_out = nn.Linear(inner_dim, dim, bias = False)
+        
+        nn.init.zeros_(self.norm.bias)
         
     def causal(self, b, h, q_idx, kv_idx):
         
@@ -197,7 +209,7 @@ class AdaLNAttention(nn.Module):
         qkv = self.to_qkv(x).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
 
-        out = F.scaled_dot_product_attention(q, k, v, attn_mask=self.block_mask)
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=self.block_mask, dropout_p=0.1)
         # out = flex_attention(q, k, v, block_mask=self.block_mask)
 
         out = rearrange(out, 'b h n d -> b n (h d)')
@@ -215,6 +227,10 @@ class AdaLNFeedForward(nn.Module):
         self.dim = dim
         self.drop_path = DropPath(drop_p) if drop_p > 0. else nn.Identity()
         self.ada_lin = nn.Sequential(nn.SiLU(inplace=False), nn.Linear(dim, 3*dim))
+        
+        nn.init.zeros_(self.norm.bias)
+        
+        
     def forward(self, x, cond):
         gamma2, scale2, shift2 = self.ada_lin(cond).view(-1, 1, 3, self.dim).unbind(2)
         x = self.norm(x).mul(scale2.add(1)).add_(shift2)
@@ -321,6 +337,23 @@ class NDPViT(pl.LightningModule):
             (21, 85),  # Level 4: 8x8 tokens
             (85, 341)  # Level 5: 16x16 tokens
         ]
+        
+                    
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                torch.nn.init.trunc_normal_(module.weight, mean=0.0, std=0.02)
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                torch.nn.init.trunc_normal_(module.weight, mean=0.0, std=0.02)
+            
+            
+        for pn, p in self.named_parameters():
+            if pn.endswith('to_out.weight'):
+                torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2*depth))
+            if pn.endswith('ada_lin.1.weight'):
+                p[:1*hidden_dim//3].data.mul_(1e-5)
+                p[1*hidden_dim//3:].data.mul_(0.5)
 
         # self.difficulty = DifficultyViT.load_from_checkpoint("./imagenet_256/diffvit/last.ckpt", vocab_size=9216, resolutions=[1, 2, 4, 8, 16], hidden_dim=512, depth=1, heads=8, mlp_dim=1024, dim_head=128)
         # self.difficulty.to("cuda")
@@ -332,6 +365,8 @@ class NDPViT(pl.LightningModule):
         self.tokenizer.to("cuda")
         self.tokenizer.eval()
         self.tokenizer = torch.compile(self.tokenizer)
+        
+        # self.transformer = torch.compile(self.transformer)
         
         blocks = torch.cat([
             torch.zeros(1, dtype=torch.int64),  # 1x1 resolution
@@ -409,13 +444,12 @@ class NDPViT(pl.LightningModule):
         
                 
         class_token = tokens[:, 0]
-        tokens = tokens[:, 1:]
+        patch_tokens = tokens[:, 1:]
         
-        patch_embeddings = self.token_embedding(tokens)
+        patch_embeddings = self.token_embedding(patch_tokens)
         class_embeddings = self.class_token_embedding(class_token)
         
         x = torch.cat([class_embeddings.unsqueeze(1), patch_embeddings], dim=1)
-        
         # Create level embeddings based on which hierarchical level each token belongs to
         # Repeat for batch dimension and add class token level
         levels = self.blocks.repeat(x.shape[0], 1)
@@ -560,7 +594,7 @@ class NDPViT(pl.LightningModule):
         masked_targets = torch.full_like(tokens, -100)
         masked_targets[loss_mask] = tokens[loss_mask]      # Fill in actual targets for masked positions
         
-        if self.trainer.global_step % 10000 == 0:
+        if self.trainer.global_step % 1000 == 0:
             print(f"Current step: {self.trainer.global_step}")
             print(f"Tokens modified: {tokens_modified[0]}")
             print("Masked targets", masked_targets[0])
@@ -607,20 +641,64 @@ class NDPViT(pl.LightningModule):
     def configure_optimizers(self):
         trainable_params = []
         trainable_params.extend(self.transformer.parameters())
-        trainable_params.extend(self.token_embedding.parameters())
-        trainable_params.extend(self.class_token_embedding.parameters())
-        trainable_params.extend(self.level_embeddings.parameters())
-        trainable_params.extend(self.ada_ln_before_head.parameters())
-        trainable_params.extend(self.linear_head.parameters())
-        optimizer = torch.optim.AdamW(trainable_params, lr=self.learning_rate, betas=(0.9, 0.95), weight_decay=0.05, fused=True)
-        scheduler = lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.05, total_iters=181)
+
+        
+        # Split params into decay and no decay groups
+        decay_params = []
+        no_decay_params = []
+        
+        for param in trainable_params:
+            if param.ndim >= 2:
+                decay_params.append(param)
+            else:
+                no_decay_params.append(param)
+                
+        no_decay_params.extend(self.token_embedding.parameters())
+        no_decay_params.extend(self.class_token_embedding.parameters())
+        no_decay_params.extend(self.level_embeddings.parameters())
+        no_decay_params.extend(self.ada_ln_before_head.parameters())
+        no_decay_params.extend(self.linear_head.parameters())
+                
+        optimizer = torch.optim.AdamW([
+            {'params': decay_params, 'weight_decay': 0.05},
+            {'params': no_decay_params, 'weight_decay': 0.0}
+        ], lr=self.learning_rate, betas=(0.9, 0.95), fused=False)
+        
+        # Create warmup scheduler for first 30 epochs, then decay
+        warmup_scheduler = lr_scheduler.LinearLR(
+            optimizer, 
+            start_factor=0.1,  # Start at 1% of learning rate
+            end_factor=1.0,     # Ramp up to full learning rate
+            total_iters=10      # Over 30 epochs
+        )
+        
+        # After warmup, decay learning rate to 5% of max over remaining epochs
+        main_scheduler = lr_scheduler.LinearLR(
+            optimizer,
+            start_factor=1.0,   # Start at full learning rate 
+            end_factor=0.01,    # Decay to 1%
+            total_iters=290     # Over remaining epochs (290)
+        )
+        
+        # Chain the schedulers
+        scheduler = lr_scheduler.SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, main_scheduler],
+            milestones=[30]  # Switch from warmup to decay after 30 epochs
+        )
+        
         return [optimizer], [scheduler]
     
-    def on_train_epoch_start(self, *args, **kwargs):
-        if self.trainer.current_epoch == 90:
-            print("Changing learning rate")
-            optimizer = self.optimizers()
-            optimizer.param_groups[0]['lr'] = self.learning_rate
+    # def on_train_epoch_start(self, *args, **kwargs):
+    #     if self.trainer.current_epoch == 90:
+    #         print("Changing learning rate")
+    #         optimizer = self.optimizers()
+    #         optimizer.param_groups[0]['lr'] = self.learning_rate
+    def on_before_optimizer_step(self, optimizer):
+    # Compute the 2-norm for each layer
+        # If using mixed precision, the gradients are already unscaled here
+        norms = grad_norm(self.transformer, norm_type=2)
+        self.log_dict(norms)
     
     def log_images(self, batch, **kwargs):
         
