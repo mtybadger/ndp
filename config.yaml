@@ -1,20 +1,48 @@
 # lightning.pytorch==2.5.0.post0
 seed_everything: 23
 trainer:
-  accelerator: mps
-  strategy: auto
-  devices: 1
+  accelerator: cuda
+  strategy:
+    class_path: lightning.pytorch.strategies.DDPStrategy
+    init_args:
+      accelerator: null
+      parallel_devices: null
+      cluster_environment: null
+      checkpoint_io: null
+      precision_plugin: null
+      ddp_comm_state: null
+      ddp_comm_hook: null
+      ddp_comm_wrapper: null
+      model_averaging_period: null
+      process_group_backend: null
+      timeout: 0:30:00
+      start_method: popen
+      output_device: null
+      dim: 0
+      broadcast_buffers: true
+      init_sync: true
+      process_group: null
+      bucket_cap_mb: null
+      find_unused_parameters: true
+      check_reduction: false
+      gradient_as_bucket_view: false
+      static_graph: false
+      delay_all_reduce_named_params: null
+      param_to_hook_all_reduce: null
+      mixed_precision: null
+      device_mesh: null
+  devices: 8
   num_nodes: 1
   precision: bf16-mixed
   logger: null
   callbacks:
   - class_path: lightning.pytorch.callbacks.ModelCheckpoint
     init_args:
-      dirpath: ./tinyimagenet/diffvit
+      dirpath: /mnt/ndp/imagenet_64/vqgan_64_16384_16_ibq
       filename: null
       monitor: null
       verbose: false
-      save_last: true
+      save_last: null
       save_top_k: -1
       save_weights_only: false
       mode: min
@@ -62,29 +90,40 @@ trainer:
   reload_dataloaders_every_n_epochs: 0
   default_root_dir: ${working_dir}
 model:
-  class_path: models.vit.DifficultyViT
+  class_path: models.vqgan.IBQSharedModel
   init_args:
-    vocab_size: 16585
-    resolutions:
-    - 1
-    - 2
-    - 4
-    - 8
-    - 16
-    hidden_dim: 512
-    depth: 1
-    heads: 8
-    mlp_dim: 1024
-    dim_head: 128
-    use_flash: true
+    ddconfig:
+      double_z: false
+      ch: 128
+      num_res_blocks: 2
+      dropout: 0.0
+    lossconfig:
+      disc_conditional: false
+      disc_in_channels: 3
+      disc_start: 10100
+      disc_weight: 0.5
+      perceptual_weight: 1.0
+      codebook_weight: 1.0
+      entropy_weight: 0.05
+    n_embed: 16384
+    embed_dim: 256
+    dropout_step: 40000
+    ckpt_path: null
+    ignore_keys: []
+    image_key: image
+    colorize_nlabels: null
+    learning_rate: 0.00015
+    monitor: null
+    remap: null
+    sane_index_shape: false
 data:
-  class_path: cli_diffvit.TinyImageNetDataModule
+  class_path: cli_multi.ImageNet64DataModule
   init_args:
-    batch_size: 8
+    batch_size: 64
     wrap: false
-    num_workers: 8
+    num_workers: 64
 debug: false
 seed: 23
 optimizer: null
 lr_scheduler: null
-ckpt_path: null
+ckpt_path: /mnt/ndp/imagenet_64/vqgan_64_16384_16_ibq/epoch=1-step=10012.ckpt

@@ -9,18 +9,18 @@ model:
     lossconfig:
       disc_conditional: false
       disc_in_channels: 3
-      disc_start: 15000
-      disc_weight: 0.5
-      perceptual_weight: 0.5
-      codebook_weight: 0.5
-    n_embed: 1024
+      disc_start: 200000
+      disc_weight: 0.15
+      perceptual_weight: 1.0
+      codebook_weight: 1.0
+    n_embed: 2048
     embed_dim: 8
     token_drop: [32, 8, 2, 0]
 data:
-  class_path: cli_single.TinyImageNetDataModule
+  class_path: cli_multi.ImageNetDataModule
   init_args:
-    batch_size: 128
-    num_workers: 8
+    batch_size: 8
+    num_workers: 32
 
 trainer:
   callbacks:
@@ -29,14 +29,20 @@ trainer:
         save_top_k: -1
         every_n_epochs: 1
         save_last: true
-        dirpath: /home/ubuntu/cifar-testing/ndp/tinyimagenet/model
+        dirpath: /mnt/ndp/imagenet_256/vqgan_8192_16
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: step
   default_root_dir: ${working_dir}
+  strategy:
+    class_path: lightning.pytorch.strategies.DDPStrategy
+    init_args:
+      find_unused_parameters: true
+      process_group_backend: nccl
   max_epochs: 50
   precision: bf16-mixed
-  devices: 1
+  devices: 8
+  num_nodes: 3
   log_every_n_steps: 10
   accelerator: cuda
 

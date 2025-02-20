@@ -6,6 +6,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
 from datasets import load_dataset
 import torch
+from torchvision.transforms import v2
 from main import (
     # SetupCallback,
     WrappedDataset,
@@ -48,10 +49,10 @@ class MyLightningCLI(LightningCLI):
         model = self.model
         datamodule = self.datamodule
         
-        self.trainer.logger = WandbLogger(project="ndpvit_256")
+        self.trainer.logger = WandbLogger(project="ndpvit_256_b")
         
         # configure learning rate
-        bs, base_lr = datamodule.batch_size, 4e-7
+        bs, base_lr = datamodule.batch_size, 2e-7
         ngpu = trainer.num_devices
         num_nodes = trainer.num_nodes
         accumulate_grad_batches = trainer.accumulate_grad_batches or 1
@@ -60,6 +61,9 @@ class MyLightningCLI(LightningCLI):
         model.learning_rate = accumulate_grad_batches * ngpu * bs * base_lr * num_nodes
         print("Setting learning rate to {:.2e} = {} (accumulate_grad_batches) * {} (num_gpus) * {} (batchsize) * {} (num_nodes) * {:.2e} (base_lr)".format(
             model.learning_rate, accumulate_grad_batches, ngpu, bs, num_nodes, base_lr))
+        
+        optimizer, scheduler = model.configure_optimizers()
+        optimizer[0].param_groups[0]['lr'] = model.learning_rate
         
         trainer.callbacks.append(ImageLogger(batch_frequency=10000, max_images=4, clamp=True))
         
@@ -123,7 +127,7 @@ class ImageLogger(Callback):
                 if self.clamp:
                     images = torch.clamp(images, -1., 1.)
                     
-            self.log_local('./imagenet_256/ndpvit_16_logs/', split, images,
+            self.log_local('./imagenet_256/ndpvit_16_b_logs/', split, images,
                            pl_module.global_step, pl_module.current_epoch, batch_idx)
 
             logger_log_images = self.logger_log_images.get(logger, lambda *args, **kwargs: None)
@@ -160,6 +164,7 @@ class TinyImageNetDataModule(pl.LightningDataModule):
             "train": "./tinyimagenet/train.jsonl",
             "test": "./tinyimagenet/test.jsonl"
         }).with_format("torch")
+    
 
         
     # def prepare_data(self):
@@ -186,7 +191,6 @@ class TinyImageNetDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         return self.val_dataloader()
-
 
 
 class ImageNetDataModule(pl.LightningDataModule):
@@ -196,11 +200,34 @@ class ImageNetDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         
-        self.dataset = load_dataset("json", data_files={
-            "train": "./imagenet_256/train.jsonl",
-            "test": "./imagenet_256/test.jsonl"
-        }).with_format("torch")
+        self.dataset = load_dataset("ILSVRC/imagenet-1k", trust_remote_code=True, cache_dir="/mnt/ndp/.cache")
+        
 
+    def collate_fn(self, batch):
+        
+        images = [item['image'] for item in batch]
+        labels = torch.tensor([item['label'] for item in batch], dtype=torch.long)
+        
+        transforms = v2.Compose([
+            v2.ToImage(),
+            # v2.Resize([256,256]),
+            v2.RandomResizedCrop([256,256], (0.75,1)),
+            v2.RandomHorizontalFlip(0.5),
+        ])
+        
+        tensors = []
+        for image in images:
+            tensor = transforms(image)
+            if tensor.shape[0] == 4:  # If image has alpha channel
+                tensor = tensor[:3]  # Keep only RGB channels
+            if tensor.shape[0] == 1:
+                tensor = tensor.repeat(3, 1, 1)
+            tensor = tensor.half() / 255.0
+            tensors.append(tensor)
+        
+        images = torch.stack(tensors).to(memory_format=torch.contiguous_format)
+        
+        return {'image': images, 'label': labels}
         
     # def prepare_data(self):
     #     pass
@@ -214,7 +241,9 @@ class ImageNetDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             persistent_workers=True,
-            shuffle=True
+            shuffle=True,
+            pin_memory=True,
+            collate_fn=self.collate_fn
         )
 
     def val_dataloader(self):
@@ -223,12 +252,13 @@ class ImageNetDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             persistent_workers=True,
-            shuffle=False
+            shuffle=False,
+            pin_memory=True,
+            collate_fn=self.collate_fn
         )
 
     def test_dataloader(self):
         return self.val_dataloader()
-
 
 
 def main():

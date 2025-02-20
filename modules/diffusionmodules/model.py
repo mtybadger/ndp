@@ -773,4 +773,3 @@ class UpsampleDecoder(nn.Module):
         h = nonlinearity(h)
         h = self.conv_out(h)
         return h
-

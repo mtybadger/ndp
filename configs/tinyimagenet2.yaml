@@ -19,7 +19,7 @@ model:
 data:
   class_path: cli_single.TinyImageNetDataModule
   init_args:
-    batch_size: 128
+    batch_size: 32
     num_workers: 8
 
 trainer:
