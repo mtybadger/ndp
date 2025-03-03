@@ -1758,7 +1758,6 @@ dependencies = [
     { name = "torchvision" },
     { name = "tqdm" },
     { name = "traitlets" },
-    { name = "transformer-engine-cu12" },
     { name = "transformers" },
     { name = "types-python-dateutil" },
     { name = "typeshed-client" },
