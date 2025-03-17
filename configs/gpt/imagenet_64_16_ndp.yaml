@@ -1,0 +1,71 @@
+model:
+  class_path: models.gpt.GPT
+  init_args:
+    config:
+      class_path: models.gpt.GPTConfig
+      init_args:
+        context_length: 341
+        content_vocab_size: 16384
+        position_vocab_size: 341
+        n_layer: 16
+        n_head: 16
+        n_embd: 1024
+        n_classes: 1000
+        dropout: 0.05
+        weight_decay: 0.05
+        learning_rate: 1e-4
+        betas: [0.9, 0.95]
+        ndp: true
+    tokenizer:
+      class_path: models.vqgan.IBQSharedModel
+      init_args:
+        n_embed: 16384
+        embed_dim: 256
+        ckpt_path: imagenet_64/vqgan_64_16384_16_ibq/epoch=49-step=250300.ckpt
+data:
+  class_path: train.ImageNet64DataModule
+  init_args:
+    batch_size: 128
+    num_workers: 128
+
+trainer:
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        save_top_k: -1
+        every_n_epochs: 5
+        dirpath: ./imagenet_64/gpt_16_ndp
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: train.ImageLogger
+      init_args:
+        batch_frequency: 1000
+        max_images: 4
+        clamp: true
+        increase_log_steps: false
+        log_dir: ./imagenet_64/gpt_logs_16_ndp
+  default_root_dir: ./imagenet_64/gpt_16_ndp
+  # strategy:
+  #   class_path: lightning.pytorch.strategies.DDPStrategy
+  #   init_args:
+  #     find_unused_parameters: true
+  max_epochs: 300
+  # max_steps: 100
+  # profiler:
+  #   class_path: lightning.pytorch.profilers.AdvancedProfiler
+  #   init_args:
+  #     dirpath: ./imagenet_64/gpt_12_ndp/profiler
+  #     filename: profile.txt
+  check_val_every_n_epoch: 3
+  gradient_clip_val: 1.0
+  precision: bf16-mixed
+  devices: 8
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: ndp_gpt
+  log_every_n_steps: 10
+  accelerator: cuda
+
+seed_everything: 23

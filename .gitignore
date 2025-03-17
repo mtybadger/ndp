@@ -66,3 +66,6 @@ lightning_logs/
 
 .cache/
 .cache2/
+
+*.pb
+*.npz

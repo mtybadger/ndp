@@ -1,0 +1,6 @@
+{
+    "exclude": [
+        "imagenet_*",
+        ".venv"
+    ]
+}

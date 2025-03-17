@@ -11,18 +11,42 @@ from tqdm import tqdm
 from torch.nn.functional import scaled_dot_product_attention
 from torch import Tensor
 from modules.muon import Muon
-
-class LayerNorm(nn.Module):
-    """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
-
-    def __init__(self, ndim, bias):
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(ndim))
-        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
-
-    def forward(self, input):
-        return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
+from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
     
+def drop_path(x, drop_prob: float = 0., training: bool = False, scale_by_keep: bool = True):
+    """Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
+
+    This is the same as the DropConnect impl I created for EfficientNet, etc networks, however,
+    the original name is misleading as 'Drop Connect' is a different form of dropout in a separate paper...
+    See discussion: https://github.com/tensorflow/tpu/issues/494#issuecomment-532968956 ... I've opted for
+    changing the layer and argument names to 'drop path' rather than mix DropConnect as a layer name and use
+    'survival rate' as the argument.
+
+    """
+    if drop_prob == 0. or not training:
+        return x
+    keep_prob = 1 - drop_prob
+    shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
+    random_tensor = x.new_empty(shape).bernoulli_(keep_prob)
+    if keep_prob > 0.0 and scale_by_keep:
+        random_tensor.div_(keep_prob)
+    return x * random_tensor
+
+def rotate(x, freqs_cis, position_tokens):
+    selected_freqs = freqs_cis[position_tokens]
+    return apply_rotary_emb(x, selected_freqs)
+
+
+class DropPath(torch.nn.Module):
+    """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
+    """
+    def __init__(self, drop_prob: float = 0., scale_by_keep: bool = True):
+        super(DropPath, self).__init__()
+        self.drop_prob = drop_prob
+        self.scale_by_keep = scale_by_keep
+
+    def forward(self, x):
+        return drop_path(x, self.drop_prob, self.training, self.scale_by_keep)
     
 def norm(x: Tensor):
     return F.rms_norm(x, (x.size(-1),))
@@ -34,7 +58,18 @@ class KVCache(nn.Module):
         self.register_buffer('k_cache', torch.zeros(cache_shape, dtype=dtype, device=device))
         self.register_buffer('v_cache', torch.zeros(cache_shape, dtype=dtype, device=device))
 
+class RMSNorm(torch.nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-5):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
 
+    def _norm(self, x):
+        return x * torch.rsqrt(torch.mean(x * x, dim=-1, keepdim=True) + self.eps)
+
+    def forward(self, x):
+        output = self._norm(x).type_as(x)
+        return output * self.weight
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
@@ -59,7 +94,7 @@ class CausalSelfAttention(nn.Module):
         #     self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
         #                                 .view(1, 1, config.block_size, config.block_size))
 
-    def forward(self, x, use_cache=False, debug=False):
+    def forward(self, x, freqs_cis, position_tokens, use_cache=False, debug=False):
         with torch.amp.autocast(device_type=x.device.type):
             B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
@@ -69,6 +104,16 @@ class CausalSelfAttention(nn.Module):
             q = q.view(B, T, self.n_head, C // self.n_head) # (B, T, nh, hs)
             v = v.view(B, T, self.n_head, C // self.n_head) # (B, T, nh, hs)
             q, k = norm(q), norm(k)
+            
+            # print('Position tokens', position_tokens, position_tokens.shape, position_tokens.dtype)
+            
+            if position_tokens.shape[1] > T:
+                q = rotate(q, freqs_cis, position_tokens[:, 1:])
+                k = rotate(k, freqs_cis, position_tokens[:, :-1])
+            else:
+                q = rotate(q, freqs_cis, position_tokens.roll(-1, dims=1))
+                k = rotate(k, freqs_cis, position_tokens)
+                
             if use_cache and not self.training:
                 k_cache = self.kv_cache.k_cache
                 v_cache = self.kv_cache.v_cache
@@ -92,13 +137,13 @@ class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=False)
-        self.gelu    = nn.GELU()
+        self.silu = nn.SiLU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=False)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
         x = self.c_fc(x)
-        x = self.gelu(x)
+        x = self.silu(x)
         x = self.c_proj(x)
         x = self.dropout(x)
         return x
@@ -107,18 +152,19 @@ class Block(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = LayerNorm(config.n_embd, bias=False)
+        self.ln_1 = RMSNorm(config.n_embd, config.norm_eps)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, bias=False)
+        self.ln_2 = RMSNorm(config.n_embd, config.norm_eps)
         self.mlp = MLP(config)
+        self.drop_path = DropPath(config.dropout) if config.dropout > 0. else nn.Identity()
 
-    def forward(self, x, use_cache=False, debug=False):
-        x = x + self.attn(self.ln_1(x), use_cache=use_cache, debug=debug)
-        x = x + self.mlp(self.ln_2(x))
+    def forward(self, x, freqs_cis, position_tokens, use_cache=False, debug=False):
+        x = x + self.drop_path(self.attn(self.ln_1(x), freqs_cis, position_tokens, use_cache=use_cache, debug=debug))
+        x = x + self.drop_path(self.mlp(self.ln_2(x)))
         return x
 
 @dataclass
-class GPTConfig:
+class LlamaConfig:
     context_length: int = 341
     content_vocab_size: int = 16384
     position_vocab_size: int = 341
@@ -130,10 +176,11 @@ class GPTConfig:
     weight_decay: float = 0.0
     learning_rate: float = 1e-4
     betas: tuple = (0.9, 0.95)
+    norm_eps: float = 1e-5
     ndp: bool = False
     image_resolution: int = 64
 
-class GPT(pl.LightningModule):
+class Llama(pl.LightningModule):
 
     def __init__(self, config, tokenizer):
         super().__init__()
@@ -144,16 +191,15 @@ class GPT(pl.LightningModule):
         self.transformer = nn.ModuleDict(dict(
             wce = nn.Embedding(config.n_classes + 1, config.n_embd),
             wte = nn.Embedding(config.content_vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.position_vocab_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = LayerNorm(config.n_embd, bias=False),
+            ln_f = RMSNorm(config.n_embd, eps=config.norm_eps),
         ))
         self.content_head = nn.Linear(config.n_embd, self.config.content_vocab_size, bias=False)
         self.position_head = nn.Linear(config.n_embd, config.position_vocab_size, bias=False)
         # init all weights
         self.apply(self._init_weights)
-        # apply special scaled init to the residual projections, per GPT-2 paper
+        # apply special scaled init to the residual projections, per Llama-2 paper
         for pn, p in self.named_parameters():
             if pn.endswith('c_proj.weight'):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
@@ -163,7 +209,22 @@ class GPT(pl.LightningModule):
         self.tokenizer.half()
         for param in self.tokenizer.parameters():
             param.requires_grad = False
+            
+        pos_emb = RotaryEmbedding(
+            dim = 16,
+            freqs_for = 'pixel',
+            max_freq = 256
+        )
+        
+        freqs0 = pos_emb.get_axial_freqs(5, 1, 1)[0].view(-1, 48)
+        freqs1 = pos_emb.get_axial_freqs(5, 2, 2)[1].view(-1, 48)    
+        freqs2 = pos_emb.get_axial_freqs(5, 4, 4)[2].view(-1, 48)
+        freqs3 = pos_emb.get_axial_freqs(5, 8, 8)[3].view(-1, 48)
+        freqs4 = pos_emb.get_axial_freqs(5, 16, 16)[4].view(-1, 48)
 
+
+            
+        self.freqs_cis = torch.cat((freqs0, freqs1, freqs2, freqs3, freqs4), dim=0)
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
         self.transformer = torch.compile(self.transformer)
@@ -176,8 +237,6 @@ class GPT(pl.LightningModule):
         params are actually used as weights in the final layer, so we include them.
         """
         n_params = sum(p.numel() for p in self.parameters())
-        if non_embedding:
-            n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
     def _init_weights(self, module):
@@ -204,7 +263,10 @@ class GPT(pl.LightningModule):
         # if position_targets is not None:
         #     print('Position targets', position_targets, position_targets.shape, position_targets.dtype)
         
-        # forward the GPT model itself
+        self.freqs_cis = self.freqs_cis.to(position_tokens.device)
+        
+        
+        # forward the Llama model itself
         if(content_tokens.shape[1] > 1):
             class_token = content_tokens[:, :1]
             content_tokens = content_tokens [:, 1:]
@@ -214,11 +276,10 @@ class GPT(pl.LightningModule):
         else:
             class_emb = self.transformer.wce(content_tokens)
             tok_emb = class_emb
-
-        pos_emb = self.transformer.wpe(position_tokens) # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
+            
+        x = self.transformer.drop(tok_emb)
         for (i, block) in enumerate(self.transformer.h):
-            x = block(x, use_cache=use_cache, debug=i == 0)
+            x = block(x, freqs_cis=self.freqs_cis, position_tokens=position_tokens, use_cache=use_cache, debug=i == 0)
         x = self.transformer.ln_f(x)
 
         if content_targets is not None and position_targets is not None:
@@ -304,7 +365,6 @@ class GPT(pl.LightningModule):
             content_tokens = torch.gather(content_tokens, dim=1, index=sorted_indices)
             position_tokens = torch.gather(position_tokens, dim=1, index=sorted_indices)
             position_targets = torch.cat((position_tokens[:, 2:], torch.full((position_tokens.size(0), 2), -100, device=position_tokens.device, dtype=torch.long)), dim=1)
-            position_tokens = torch.cat((position_tokens[:, 1:], torch.full((position_tokens.size(0), 1), self.config.position_vocab_size - 1, device=position_tokens.device, dtype=torch.long)), dim=1)
 
         else:
             content_tokens = torch.cat((class_token, ind4, ind3, ind2, ind1), dim=1)
